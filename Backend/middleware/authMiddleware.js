@@ -30,7 +30,7 @@ export const authenticateUser = async (req, res, next) => {
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    const user = await User.findByPk(decoded.id, { attributes: ["id", "isActive"] });
+    const user = await User.findById(decoded.id).select("role isActive");
     if (!user || !user.isActive) {
       return res.status(401).json({
         success: false,
@@ -38,7 +38,8 @@ export const authenticateUser = async (req, res, next) => {
       });
     }
 
-    req.user = decoded;
+    // Role in database is used
+    req.user = { id: user.Id, role: user.role };
 
     next();
   } catch (error) {
