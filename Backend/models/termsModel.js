@@ -1,43 +1,14 @@
-import { DataTypes } from "sequelize";
-import sequelize from "../config/database.js";
+import mongoose from "mongoose";
+import { schemaOptions } from "../utils/schemaOptions.js";
 
-
-const Terms = sequelize.define(
-  "Terms",
+const termsSchema = new mongoose.Schema(
   {
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
-      primaryKey: true,
-    },
-
-    version: {
-      type: DataTypes.STRING,
-      allowNull: false,
-      unique: true, // e.g. "v1.0"
-    },
-
-    content: {
-      type: DataTypes.TEXT,
-      allowNull: false,
-    },
-
-    isActive: {
-      type: DataTypes.BOOLEAN,
-      allowNull: false,
-      defaultValue: false,
-    },
-
-    publishedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW,
-    },
+    version: { type: String, required: true, unique: true }, // e.g. "v1.0"
+    content: { type: String, required: true },
+    isActive: { type: Boolean, default: false },
+    publishedAt: { type: Date, default: Date.now },
   },
-  {
-    tableName: "terms",
-    timestamps: true,
-  }
+  schemaOptions
 );
 
-export default Terms;
+export default mongoose.model("Terms", termsSchema);
