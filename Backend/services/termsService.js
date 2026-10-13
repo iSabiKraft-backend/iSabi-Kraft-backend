@@ -3,7 +3,7 @@ import User from "../models/userModel.js";
 
 // GET /terms — public, shown at signup / before posting a job
 export async function getActiveTerms() {
-  const active = await Terms.findOne({ where: { isActive: true }, order: [["publishedAt", "DESC"]] });
+  const active = await Terms.findOne({ isActive: true }).sort({ publishedAt: -1 });
 
   if (!active) {
     const error = new Error("No terms have been published yet.");
@@ -17,7 +17,7 @@ export async function getActiveTerms() {
 // POST /terms/accept — authenticated user accepts the currently active
 // version. Dev 2 / Dev 3 gate their flows on this via requireTermsAccepted.
 export async function acceptTerms(userId, version) {
-  const active = await Terms.findOne({ where: { isActive: true } });
+  const active = await Terms.findOne({ isActive: true });
 
   if (!active) {
     const error = new Error("No terms have been published yet.");
@@ -33,8 +33,8 @@ export async function acceptTerms(userId, version) {
     throw error;
   }
 
-  const user = await User.findByPk(userId);
-  await user.update({ termsAcceptedVersion: version, termsAcceptedAt: new Date() });
+  await User.updateOne({ _id: userId }, { termsAcceptedVersion: version, termsAcceptedAt: new Date() });
+  const user = await User.findById(userId);
 
   return {
     termsAcceptedVersion: user.termsAcceptedVersion,
@@ -45,6 +45,12 @@ export async function acceptTerms(userId, version) {
 // POST /terms — admin publishes a new version. Deactivates any previous
 // active version so there's only ever one source of truth for the gate.
 export async function publishTerms({ version, content }) {
-  await Terms.update({ isActive: false }, { where: { isActive: true } });
-  return await Terms.create({ version, content, isActive: true });
+  // Create first (inactive): a duplicate version fails here on the unique
+  // index, leaving the currently active terms untouched.
+  const terms = await Terms.create({ version, content, isActive: false });
+
+  await Terms.updateMany({ isActive: true, _id: { $ne: terms._id } }, { isActive: false });
+  terms.isActive = true;
+  await terms.save();
+  return terms;
 }
