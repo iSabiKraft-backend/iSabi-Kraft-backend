@@ -1,78 +1,32 @@
-import { DataTypes } from "sequelize";
-import sequelize from "../config/database.js";
+import mongoose from "mongoose";
+import { schemaOptions } from "../utils/schemaOptions.js";
 
-const User = sequelize.define(
-  "User",
+const userSchema = new mongoose.Schema(
   {
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
-      primaryKey: true,
-    },
-
-    firstName: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-
-    lastName: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-
+    firstName: { type: String, required: true, trim: true },
+    lastName: { type: String, required: true, trim: true },
     email: {
-      type: DataTypes.STRING,
-      allowNull: false,
+      type: String,
+      required: true,
       unique: true,
-      validate: {
-        isEmail: true,
-      },
+      lowercase: true,
+      trim: true,
+      match: [/^\S+@\S+\.\S+$/, "Provide a valid email address"],
     },
-
-    phone: {
-      type: DataTypes.STRING,
-      allowNull: false,
-      unique: true,
-    },
-
-    password: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-
-    role: {
-      type: DataTypes.ENUM("customer", "artisan", "admin"),
-      allowNull: false,
-      defaultValue: "customer",
-    },
-
-    isActive: {
-      type: DataTypes.BOOLEAN,
-      allowNull: false,
-      defaultValue: true,
-    },
+    phone: { type: String, required: true, unique: true, trim: true },
+    
+    password: { type: String, required: true, select: false },
+    role: { type: String, enum: ["customer", "artisan", "admin"], default: "customer" },
+    isActive: { type: Boolean, default: true },
 
     // Terms gate — Dev 2 (job posting) and Dev 3 (payment) both check this
     // via requireTermsAccepted before letting a user transact.
-    termsAcceptedVersion: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
-
-    termsAcceptedAt: {
-      type: DataTypes.DATE,
-      allowNull: true,
-    },
-
-    lastLoginAt: {
-      type: DataTypes.DATE,
-      allowNull: true,
-    },
+    termsAcceptedVersion: { type: String, default: null },
+    termsAcceptedAt: { type: Date, default: null },
+    lastLoginAt: { type: Date, default: null },
   },
-  {
-    tableName: "users",
-    timestamps: true,
-  }
+  schemaOptions
 );
 
-export default User;
+export default mongoose.model("User", userSchema);
+
