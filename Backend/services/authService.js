@@ -1,4 +1,3 @@
-import { Op } from "sequelize";
 import User from "../models/userModel.js";
 import { hashPassword, comparePassword } from "../utils/hashPassword.js";
 import { generateToken } from "../utils/generateToken.js";
@@ -8,9 +7,7 @@ export async function registerUser(userData) {
   const { firstName, lastName, email, phone, password, role } = userData;
 
   // Check if email or phone already exists
-  const existingUser = await User.findOne({
-    where: { [Op.or]: [{ email }, { phone }] },
-  });
+  const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
 
   if (existingUser) {
     const error = new Error("An account with this email or phone already exists.");
@@ -18,10 +15,8 @@ export async function registerUser(userData) {
     throw error;
   }
 
-  // Hash password
   const hashedPassword = await hashPassword(password);
 
-  // Create user
   const newUser = await User.create({
     firstName,
     lastName,
@@ -31,24 +26,18 @@ export async function registerUser(userData) {
     role: role || "customer",
   });
 
-  // Generate JWT
   const token = generateToken(newUser);
 
-  const userResponse = newUser.toJSON();
-  delete userResponse.password;
-
-  return {
-    user: userResponse,
-    token,
-  };
+  // toJSON strips the password
+  return { user: newUser.toJSON(), token };
 }
 
 // *Login an existing user
 export async function loginUser(loginData) {
   const { email, password } = loginData;
 
-  // Find user by email
-  const user = await User.findOne({ where: { email } });
+  // password is select:false, so ask for it explicitly
+  const user = await User.findOne({ email }).select("+password");
 
   if (!user || !user.isActive) {
     const error = new Error("Invalid email or password.");
@@ -56,7 +45,6 @@ export async function loginUser(loginData) {
     throw error;
   }
 
-  // Compare passwords
   const passwordMatch = await comparePassword(password, user.password);
 
   if (!passwordMatch) {
@@ -68,14 +56,8 @@ export async function loginUser(loginData) {
   user.lastLoginAt = new Date();
   await user.save();
 
-  // Generate JWT
   const token = generateToken(user);
 
-  const userResponse = user.toJSON();
-  delete userResponse.password;
-
-  return {
-    user: userResponse,
-    token,
-  };
+  return { user: user.toJSON(), token };
 }
+
