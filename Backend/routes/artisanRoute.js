@@ -16,6 +16,7 @@ import {
   addPortfolioItemValidator,
   submitVerificationValidator,
   reviewVerificationValidator,
+  artisanIdParamValidator
 } from "../validators/artisanValidator.js";
 
 const route = express.Router();
@@ -26,7 +27,7 @@ route.get("/", search);
 // Admin verification queue — defined before "/:id" so it isn't swallowed by it
 route.get("/verification-queue", authenticateUser, authorizeRoles("admin"), listPendingVerifications);
 
-route.get("/:id", getById);
+route.get("/:id", artisanIdParamValidator, validateRequest, getById);
 
 // Artisan self-service
 route.put(
@@ -61,6 +62,7 @@ route.patch(
   "/:id/verification",
   authenticateUser,
   authorizeRoles("admin"),
+  artisanIdParamValidator,
   reviewVerificationValidator,
   validateRequest,
   reviewVerification
