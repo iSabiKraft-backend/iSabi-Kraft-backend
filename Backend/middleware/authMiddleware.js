@@ -39,7 +39,7 @@ export const authenticateUser = async (req, res, next) => {
     }
 
     // Role in database is used
-    req.user = { id: user.Id, role: user.role };
+    req.user = { id: user.id, role: user.role };
 
     next();
   } catch (error) {
