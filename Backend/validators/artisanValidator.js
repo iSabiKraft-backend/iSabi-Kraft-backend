@@ -1,4 +1,4 @@
-import { body } from "express-validator";
+import { body, param } from "express-validator";
 import { CORE_CATEGORIES } from "../models/artisanProfileModel.js";
 
 export const upsertProfileValidator = [
@@ -14,6 +14,7 @@ export const upsertProfileValidator = [
   body("categories")
     .isArray({ min: 1 })
     .withMessage("Select at least one category")
+    .bail()
     .custom((value) => value.every((c) => CORE_CATEGORIES.includes(c)))
     .withMessage(`Categories must be one of: ${CORE_CATEGORIES.join(", ")}`),
 
@@ -35,10 +36,11 @@ export const addPortfolioItemValidator = [
 export const submitVerificationValidator = [
   body("idType").isIn(["NIN", "BVN"]).withMessage("idType must be NIN or BVN"),
 
+  // NIN and BVN are both 11 digits
   body("idNumber")
     .trim()
-    .isLength({ min: 10, max: 11 })
-    .withMessage("idNumber must be 10-11 digits"),
+    .matches(/^\d{11}$/)
+    .withMessage("idNumber must be exactly 11 digits"),
 ];
 
 export const reviewVerificationValidator = [
@@ -51,3 +53,6 @@ export const reviewVerificationValidator = [
 
   body("rejectionReason").optional().trim().isLength({ max: 300 }),
 ];
+
+// Reject malformed ids with a 400 instead of a Postgres "invalid uuid" 500
+export const artisanIdParamValidator = [param("id").isMongoId().withMessage("Invalid artisan id")];
