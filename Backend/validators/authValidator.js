@@ -14,8 +14,9 @@ export const registerValidator = [
 
   body("phone").trim().notEmpty().withMessage("Phone number is required"),
 
+  // no .trim(): login doesn't trim, so trimming here would lock out
+  // anyone whose password starts/ends with a space
   body("password")
-    .trim()
     .isLength({ min: 8 })
     .withMessage("Password must be at least 8 characters long"),
 
