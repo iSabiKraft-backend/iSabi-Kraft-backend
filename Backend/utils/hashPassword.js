@@ -1,4 +1,4 @@
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 
 // used when hashing the password
 const SALT_ROUNDS = 10;
