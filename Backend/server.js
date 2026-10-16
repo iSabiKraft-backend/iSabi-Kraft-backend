@@ -1,8 +1,9 @@
+import 'dotenv/config';
 import app from './app.js';
 import { validateEnv } from './config/env.js';
-import { connectDatabase } from './config/database.js';
+import connectDB from './config/db.js';
 
 validateEnv();
-await connectDatabase();
-const port = Number(process.env.PORT || 3000);
+await connectDB();
+const port = Number(process.env.PORT || 4000);
 app.listen(port, () => console.log(`iSabiKraft API listening on ${port}`));
