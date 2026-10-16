@@ -3,17 +3,17 @@ import mongoose from "mongoose";
 //Escrow schema
 const escrowSchema = new mongoose.Schema(
   {
-    customerID: {
+    customerId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
         required: true
     },
-    artisanID: {
+    artisanId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
         required: true
     },
-    jobID: {
+    jobId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Job",
         required: true

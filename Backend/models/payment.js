@@ -3,12 +3,12 @@ import mongoose from "mongoose";
 //Payment schema
 const paymentSchema = new mongoose.Schema(
   {
-    customerID: {
+    customerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true
     },
-    jobID: {
+    jobId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Job",
       required: true
