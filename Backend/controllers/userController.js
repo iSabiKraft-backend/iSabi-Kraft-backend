@@ -1,4 +1,10 @@
-import { getMe as getMeService, updateMe as updateMeService, listUsers as listUsersService } from "../services/userService.js";
+import {
+  getMe as getMeService,
+  updateMe as updateMeService,
+  listUsers as listUsersService,
+  completeProfile as completeProfileService,
+  setAvatar as setAvatarService,
+} from "../services/userService.js";
 
 export const getMe = async (req, res, next) => {
   try {
@@ -19,6 +25,28 @@ export const updateMe = async (req, res, next) => {
       message: "Profile updated successfully.",
       data: user,
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// PUT /users/me/profile — "Complete Your Profile"
+export const completeProfile = async (req, res, next) => {
+  try {
+    const user = await completeProfileService(req.user.id, req.body);
+
+    return res.status(200).json({ success: true, message: "Profile completed.", data: user });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /users/me/avatar — profile photo (multipart, field "avatar")
+export const uploadAvatar = async (req, res, next) => {
+  try {
+    const user = await setAvatarService(req.user.id, req.file);
+
+    return res.status(200).json({ success: true, message: "Profile photo updated.", data: user });
   } catch (error) {
     next(error);
   }

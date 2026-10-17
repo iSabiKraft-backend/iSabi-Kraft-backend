@@ -15,27 +15,65 @@ Disputes and admin: dispute handling, artisan approval, and marketplace monitori
 MVP scope
 Built for a 6-week buildathon, launching in one Lagos corridor with three trade categories: electrical, carpentry, and cleaning services.
 Project structure
-src/
-├── config/        # database, env, Paystack setup
+Backend/
+├── config/        # database (Mongoose/MongoDB), env validation, Paystack client
 ├── controllers/   # request handlers
-├── models/        # data models
-├── routes/        # API routes
-├── services/      # business logic (payment, escrow, terms, notifications)
-├── middleware/    # auth, roles, error handling
-└── utils/         # constants, reference generation, document hashing
+├── middleware/    # auth, roles, terms gate, validation, error handling
+├── models/        # Mongoose models (index.js)
+├── routes/        # API routes, mounted under /api (routes/index.js)
+├── services/      # business logic (auth, users, artisans, terms, Paystack, escrow)
+├── validators/    # express-validator rules
+└── utils/         # token, password hashing, NIN/BVN hashing
+
 Tech stack
-Node.js, Express, Paystack (payments), Database ().
+Node.js (18+), Express 5, MongoDB via Mongoose, JWT auth, Paystack (payments/transfers).
 
-## Live selfie verification
+Getting started
+1. npm install
+2. Copy .env.example to .env and fill it in (needs a running MongoDB, local or Atlas)
+3. npm run dev   (or npm start)
 
-Authenticated users can start a selfie session after consenting, upload the requested camera frames in order, and submit them for admin review. Admins can review pending sessions and view frames through protected routes. Selfie frames are stored under `private/` (or `PRIVATE_DIR`) and are not served from the public uploads path; rejected and expired frames are removed, and approved frames are removed after the retention period.
+Collections and indexes are created automatically on start. Paystack webhook URL: POST /api/payments/paystack/webhook
 
-The API is mounted at `/api/verification/selfie`:
+Onboarding & authentication API (matches the Figma "Customer" screens)
+All routes are under /api. Success responses are { success, message?, data }; errors are { success: false, message, ...extra }.
 
-- `POST /sessions` with `{ "consent": true }` starts a session.
-- `POST /sessions/:id/frames` accepts multipart fields `challenge` and `frame`.
-- `POST /sessions/:id/submit` submits completed steps for review.
-- `GET /status` returns the current user's verification status.
-- Admins use `GET /queue`, `GET /:id/frames/:index`, and `PATCH /:id` to review.
+Create account (step 1 of 2)  ->  Verify Your Account  ->  Account Verified  ->  Complete Your Profile (step 2 of 2)
+- POST /auth/register          { fullName, phone?, email?, verificationMethod: "email"|"sms", password, confirmPassword, acceptTerms: true, role?: "customer"|"artisan" }
+                               -> 201 { verificationRequired, channel, destination, expiresInSeconds, resendAvailableInSeconds }. No token yet.
+- POST /auth/verify            { identifier (email or phone), code (6 digits) } -> { user, token }
+- POST /auth/resend-verification { identifier } -> new code; 429 { resendAvailableInSeconds } during the cooldown
+- GET  /locations/states, GET /locations/states/:state/lgas   (fill the State / LGA dropdowns)
+- PUT  /users/me/profile       { fullName?, state, lga, dateOfBirth: "YYYY-MM-DD", address? }  (auth) -> user with profileCompleted: true
+- POST /users/me/avatar        multipart/form-data, field "avatar" (JPEG/PNG/WebP, max 2 MB)   (auth)
 
-Optional settings: `PRIVATE_DIR`, `SELFIE_SESSION_TTL_SECONDS`, `SELFIE_CHALLENGE_COUNT`, `SELFIE_MIN_FRAME_GAP_MS`, `SELFIE_MAX_SESSIONS_PER_DAY`, and `SELFIE_RETENTION_DAYS`. Use a persistent private volume for `PRIVATE_DIR` in production.
+Sign in ("Welcome Back")
+- POST /auth/login             { identifier (email or phone), password, role?: "customer"|"artisan" (the tab), rememberMe? } -> { user, token }
+                               403 { code: "ACCOUNT_NOT_VERIFIED", requiresVerification: true } -> send the user to the verify screen (a fresh code is sent)
+                               403 { code: "ROLE_MISMATCH", accountRole } -> wrong tab
+                               Use user.profileCompleted to decide between "Complete Your Profile" and Home.
+- POST /auth/social            { provider: "google"|"apple", idToken, role?, fullName? } -> { user, token, isNewUser }
+
+Forgot password -> Check your Email/SMS -> Create New Password -> Password Reset
+- POST /auth/forgot-password   { identifier } -> { channel: "email"|"sms", destination, resendAvailableInSeconds }  (same answer whether or not the account exists)
+- GET  /auth/reset-password/validate?token=...   (optional: check the link when the screen opens)
+- POST /auth/reset-password    { token, password, confirmPassword } -> signs out all existing sessions
+
+Password rules: at least 8 characters, one uppercase letter, one number, one special character.
+
+Providers (see .env.example): email via any SMTP server, SMS via Termii, Google/Apple via your OAuth client IDs.
+With none configured and EXPOSE_DEV_OTP=true (development only), codes/links are printed to the console and returned in the response as devCode / devResetLink.
+
+Live selfie verification (all routes need a logged-in user; admin routes need role "admin")
+How it works: the app asks the user to do a few RANDOM actions on camera (blink, turn head left/right, smile, look up) and
+uploads one camera frame per action, in order, within a short time window. An admin then reviews the frames before approving.
+The frames are stored privately (never served statically) and deleted after review/retention.
+- POST /verification/selfie/sessions                 { consent: true } -> { sessionId, challenges: [{ id, instruction }], expiresAt, expiresInSeconds, minFrameGapMs }
+- POST /verification/selfie/sessions/:id/frames      multipart: challenge (the id being performed) + frame (JPEG/PNG/WebP, max 3 MB)
+                                                     -> { captured, nextChallenge, remaining }. 409 + expectedChallenge if out of order, 429 if too fast, 410 if the session expired.
+- POST /verification/selfie/sessions/:id/submit      -> 202, goes to the admin queue
+- GET  /verification/selfie/status                   -> { selfieStatus: not_started|pending_review|approved|rejected, selfieVerified, latestSession }
+- Admin: GET /verification/selfie/queue, GET /verification/selfie/:id/frames/:index (the image), PATCH /verification/selfie/:id { decision, rejectionReason? }
+Artisans: an admin cannot approve an artisan (PATCH /artisans/:id/verification) until that artisan's selfie is approved (409 code SELFIE_REQUIRED).
+Limits: this proves a live, human-paced, challenge-response capture reviewed by a person. It does not do automated face matching or
+deep-fake/spoof detection — for that, a provider will be integrated to handle this, such as Smile ID, Dojah or Youverify into submitSession().

@@ -1,49 +1,22 @@
 import mongoose from "mongoose";
+import { schemaOptions } from "../utils/schemaOptions.js";
 
-//Escrow Transaction schema
 const escrowTransactionSchema = new mongoose.Schema(
   {
-    escrowId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Escrow",
-        required: true,
-        index: true
-    },
+    escrowID: { type: mongoose.Schema.Types.ObjectId, ref: "Escrow", required: true },
     transactionType: {
-        type: String,
-        enum: ["material_payment", "balance_release", "funding"],
-        required: true
+      type: String,
+      enum: ["funding", "material_payment", "balance_release", "refund"],
+      required: true,
     },
-    amount: {
-        type: Number,
-        required: true,
-        min: 0
-    },
-    currency: {
-        type: String,   
-        default: "NGN"
-    },
-    providerReference: {
-        type: String,
-        required: true,
-        unique: true,
-        trim: true 
-    },
-    status: {
-        type: String,
-        enum: ["pending", "completed", "failed", "reversed"],
-        default: "pending",
-        index: true
-    },
-    paidAt: {
-        type: Date,
-        index: true
-    },
-    metadata: {
-        type: mongoose.Schema.Types.Mixed
-    }
+    amount: { type: Number, required: true },
+    currency: { type: String, default: "NGN" },
+    reference: { type: String, required: true, unique: true },
+    status: { type: String, enum: ["pending", "completed", "failed"], default: "pending" },
+    paidAt: { type: Date },
+    metadata: { type: mongoose.Schema.Types.Mixed },
   },
-  { timestamps: true }
+  schemaOptions
 );
 
 export default mongoose.model("EscrowTransaction", escrowTransactionSchema);

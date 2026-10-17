@@ -2,6 +2,7 @@ import ArtisanProfile, { CORE_CATEGORIES } from "../models/artisanProfileModel.j
 import PortfolioItem from "../models/portfolioItemModel.js";
 import User from "../models/userModel.js";
 import { hashIdNumber, lastFourDigits } from "../utils/hashIdNumber.js";
+import { httpError } from "../utils/httpError.js";
 
 // Only these fields may be written from a request body. Without this, an
 // artisan could send {"verificationStatus":"approved","avgRating":5,"userId":...}.
@@ -10,7 +11,6 @@ const PORTFOLIO_FIELDS = ["url", "type", "caption"];
 const pick = (obj = {}, keys) => Object.fromEntries(keys.filter((k) => obj[k] !== undefined).map((k) => [k, obj[k]]));
 const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const httpError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
 
 // Attach { user, portfolio } to each profile (Mongoose has no joins; two batched queries).
 async function withRelations(profiles, { userFields, portfolioLimit } = {}) {
@@ -120,7 +120,7 @@ export async function submitVerification(userId, { idType, idNumber }) {
 export async function listPendingVerifications() {
   const profiles = await ArtisanProfile.find({ verificationStatus: "pending" }).sort({ updatedAt: 1 });
   const users = await User.find({ _id: { $in: profiles.map((p) => p.userId) } }).select(
-    "firstName lastName email phone"
+    "firstName lastName email phone selfieStatus"
   );
   const userById = new Map(users.map((u) => [String(u._id), u.toJSON()]));
   return profiles.map((p) => ({ ...p.toJSON(), user: userById.get(String(p.userId)) || null }));
@@ -130,6 +130,18 @@ export async function listPendingVerifications() {
 export async function reviewVerification(artisanId, adminId, { decision, tier, rejectionReason }) {
   const profile = await ArtisanProfile.findById(artisanId);
   if (!profile) throw httpError("Artisan not found.", 404);
+
+  // An artisan can't be approved until their live selfie check has been approved
+  // (turn off with REQUIRE_SELFIE_FOR_ARTISAN_APPROVAL=false).
+  if (decision === "approved" && process.env.REQUIRE_SELFIE_FOR_ARTISAN_APPROVAL !== "false") {
+    const owner = await User.findById(profile.userId).select("selfieStatus");
+    if (owner?.selfieStatus !== "approved") {
+      throw httpError("This artisan's live selfie verification must be approved first.", 409, {
+        code: "SELFIE_REQUIRED",
+        selfieStatus: owner?.selfieStatus ?? "not_started",
+      });
+    }
+  }
 
   profile.set({
     verificationStatus: decision,
