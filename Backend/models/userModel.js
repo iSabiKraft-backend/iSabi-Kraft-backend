@@ -19,6 +19,13 @@ const userSchema = new mongoose.Schema(
     role: { type: String, enum: ["customer", "artisan", "admin"], default: "customer" },
     isActive: { type: Boolean, default: true },
 
+    selfieStatus: {
+      type: String,
+      enum: ["not_started", "pending_review", "approved", "rejected"],
+      default: "not_started",
+    },
+    selfieReviewedAt: { type: Date, default: null },
+
     // Terms gate — Dev 2 (job posting) and Dev 3 (payment) both check this
     // via requireTermsAccepted before letting a user transact.
     termsAcceptedVersion: { type: String, default: null },
@@ -29,4 +36,3 @@ const userSchema = new mongoose.Schema(
 );
 
 export default mongoose.model("User", userSchema);
-

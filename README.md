@@ -25,3 +25,17 @@ src/
 └── utils/         # constants, reference generation, document hashing
 Tech stack
 Node.js, Express, Paystack (payments), Database ().
+
+## Live selfie verification
+
+Authenticated users can start a selfie session after consenting, upload the requested camera frames in order, and submit them for admin review. Admins can review pending sessions and view frames through protected routes. Selfie frames are stored under `private/` (or `PRIVATE_DIR`) and are not served from the public uploads path; rejected and expired frames are removed, and approved frames are removed after the retention period.
+
+The API is mounted at `/api/verification/selfie`:
+
+- `POST /sessions` with `{ "consent": true }` starts a session.
+- `POST /sessions/:id/frames` accepts multipart fields `challenge` and `frame`.
+- `POST /sessions/:id/submit` submits completed steps for review.
+- `GET /status` returns the current user's verification status.
+- Admins use `GET /queue`, `GET /:id/frames/:index`, and `PATCH /:id` to review.
+
+Optional settings: `PRIVATE_DIR`, `SELFIE_SESSION_TTL_SECONDS`, `SELFIE_CHALLENGE_COUNT`, `SELFIE_MIN_FRAME_GAP_MS`, `SELFIE_MAX_SESSIONS_PER_DAY`, and `SELFIE_RETENTION_DAYS`. Use a persistent private volume for `PRIVATE_DIR` in production.
