@@ -1,179 +1,42 @@
-import paystackRequest from "../config/paystack.js";
 import crypto from "node:crypto";
+import { paystackRequest } from "../config/paystack.js";
 
-// Generate a unique transaction reference.
+// Generate a unique reference for a transaction / transfer
 const makeReference = () => `isk_${crypto.randomUUID()}`;
 
-// Initialize a customer payment.
-const initializePayment = async (data) => {
-    try {
-        const response = await paystackRequest(
-            "/transaction/initialize",
-            "POST",
-            {
-                ...data,
-                reference: makeReference(),
-            }
-        );
+// paystackRequest(path, method, body) already unwraps Paystack's `data`
+// field and throws an Error with a statusCode on failure.
+async function initializePayment(data) {
+  // amount must be in kobo; callers may pass their own reference so they can store it first
+  return paystackRequest("/transaction/initialize", "POST", {
+    ...data,
+    reference: data.reference || makeReference(),
+  });
+}
 
-        return response.data;
-    } catch (error) {
-        console.error("Error initializing payment:", error.message);
-        throw new Error(
-            error.response?.data?.message ||
-            error.message ||
-            "Failed to initialize payment"
-        );
-    }
-};
+const verifyPayment = async (reference) =>
+  paystackRequest(`/transaction/verify/${encodeURIComponent(reference)}`);
 
-// Verify a customer payment.
-// Returns Paystack's transaction object in response.data.
-const verifyPayment = async (reference) => {
-    if (!reference) {
-        throw new Error("Payment reference is required");
-    }
+const createTransferRecipient = async (data) => paystackRequest("/transferrecipient", "POST", data);
 
-    try {
-        const response = await paystackRequest(
-            `/transaction/verify/${encodeURIComponent(reference)}`
-        );
+// Transfer to artisan
+const transferToArtisan = async (data) => paystackRequest("/transfer", "POST", data);
 
-        return response.data;
-    } catch (error) {
-        console.error("Error verifying payment:", error.message);
-        throw new Error(
-            error.response?.data?.message ||
-            error.message ||
-            "Failed to verify payment"
-        );
-    }
-};
-
-// Validate the transaction object returned by verifyPayment().
-// expectedAmount is expressed in naira.
-const validateVerifiedPaymentData = (
-    paymentData,
-    expectedAmount
-) => {
-    if (!paymentData || paymentData.status !== "success") {
-        throw new Error("Payment was not successful");
-    }
-
-    if (paymentData.currency !== "NGN") {
-        throw new Error("Payment currency must be NGN");
-    }
-
-    const amountInKobo = Number(paymentData.amount);
-    const expectedAmountInNaira = Number(expectedAmount);
-
-    if (
-        !Number.isFinite(amountInKobo) ||
-        !Number.isFinite(expectedAmountInNaira) ||
-        expectedAmountInNaira <= 0
-    ) {
-        throw new Error("Invalid payment amount");
-    }
-
-    if (
-        amountInKobo !== Math.round(expectedAmountInNaira * 100)
-    ) {
-        throw new Error("Payment amount does not match");
-    }
-
-    if (!paymentData.reference) {
-        throw new Error("Payment reference is missing");
-    }
-
-    return true;
-};
-
-// Create a Paystack transfer recipient.
-const createTransferRecipient = async (data) => {
-    try {
-        const response = await paystackRequest(
-            "/transferrecipient",
-            "POST",
-            data
-        );
-
-        return response.data;
-    } catch (error) {
-        console.error(
-            "Error creating transfer recipient:",
-            error.message
-        );
-
-        throw new Error(
-            error.response?.data?.message ||
-            error.message ||
-            "Failed to create transfer recipient"
-        );
-    }
-};
-
-// Initiate a transfer to an artisan.
-const transferToArtisan = async (data) => {
-    try {
-        const response = await paystackRequest(
-            "/transfer",
-            "POST",
-            data
-        );
-
-        return response.data;
-    } catch (error) {
-        console.error(
-            "Error transferring to artisan:",
-            error.message
-        );
-
-        throw new Error(
-            error.response?.data?.message ||
-            error.message ||
-            "Failed to initiate transfer"
-        );
-    }
-};
-
-// Validate a Paystack webhook signature.
-// Express must preserve the original raw request body as req.rawBody.
-const validWebHookSignature = (req) => {
-    const signature = req.headers["x-paystack-signature"];
-    const secret = process.env.PAYSTACK_SECRET_KEY;
-    const rawBody = req.rawBody;
-
-    if (!signature || !secret || !rawBody) {
-        return false;
-    }
-
-    if (!/^[a-f0-9]{128}$/i.test(signature)) {
-        return false;
-    }
-
-    const expectedSignature = crypto
-        .createHmac("sha512", secret)
-        .update(rawBody)
-        .digest("hex");
-
-    const receivedBuffer = Buffer.from(signature, "hex");
-    const expectedBuffer = Buffer.from(expectedSignature, "hex");
-
-    return (
-        receivedBuffer.length === expectedBuffer.length &&
-        crypto.timingSafeEqual(
-            receivedBuffer,
-            expectedBuffer
-        )
-    );
+// Validate Paystack webhook signature. Must be given the RAW request body
+// (Buffer/string) exactly as received — re-serialising parsed JSON breaks the HMAC.
+function validWebHookSignature(rawBody, signature) {
+  if (!signature || !rawBody) return false;
+  const hash = crypto.createHmac("sha512", process.env.PAYSTACK_SECRET_KEY).update(rawBody).digest("hex");
+  const a = Buffer.from(hash);
+  const b = Buffer.from(String(signature));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 export {
-    makeReference,
-    initializePayment,
-    verifyPayment,
-    validateVerifiedPaymentData,
-    createTransferRecipient,
-    transferToArtisan,
-    validWebHookSignature,
+  makeReference,
+  initializePayment,
+  verifyPayment,
+  createTransferRecipient,
+  transferToArtisan,
+  validWebHookSignature,
 };

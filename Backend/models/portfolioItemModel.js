@@ -4,6 +4,7 @@ import { schemaOptions } from "../utils/schemaOptions.js";
 // Mandatory evidence of past work (PRD §4: "Mandatory photo/video
 // portfolios of past work"). Append-only from the controller's point of
 // view — see artisanController.addPortfolioItem — so an artisan can't
+// silently rewrite evidence a customer is relying on.
 const portfolioItemSchema = new mongoose.Schema(
   {
     artisanProfileId: { type: mongoose.Schema.Types.ObjectId, ref: "ArtisanProfile", required: true, index: true },
@@ -15,4 +16,3 @@ const portfolioItemSchema = new mongoose.Schema(
 );
 
 export default mongoose.model("PortfolioItem", portfolioItemSchema);
-

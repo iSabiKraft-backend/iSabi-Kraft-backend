@@ -30,7 +30,7 @@ export const authenticateUser = async (req, res, next) => {
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    const user = await User.findById(decoded.id).select("role isActive");
+    const user = await User.findById(decoded.id).select("role isActive passwordChangedAt");
     if (!user || !user.isActive) {
       return res.status(401).json({
         success: false,
@@ -38,7 +38,15 @@ export const authenticateUser = async (req, res, next) => {
       });
     }
 
-    // Role in database is used
+    // A password reset signs out every session issued before it
+    if ((decoded.pwv ?? 0) !== (user.passwordChangedAt ? user.passwordChangedAt.getTime() : 0)) {
+      return res.status(401).json({
+        success: false,
+        message: "Password was changed. Please sign in again.",
+      });
+    }
+
+    // Use the role currently in the database, not the one frozen in the token
     req.user = { id: user.id, role: user.role };
 
     next();

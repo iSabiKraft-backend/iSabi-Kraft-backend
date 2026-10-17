@@ -3,6 +3,8 @@ import authRoutes from "./authRoute.js";
 import userRoutes from "./userRoute.js";
 import artisanRoutes from "./artisanRoute.js";
 import termsRoutes from "./termsRoute.js";
+import locationRoutes from "./locationRoute.js";
+import selfieVerificationRoutes from "./selfieVerificationRoute.js";
 
 const route = express.Router();
 
@@ -10,6 +12,8 @@ route.use("/auth", authRoutes);
 route.use("/users", userRoutes);
 route.use("/artisans", artisanRoutes);
 route.use("/terms", termsRoutes);
+route.use("/locations", locationRoutes);
+route.use("/verification/selfie", selfieVerificationRoutes);
 
 // Dev 2 adds, e.g.:
 // route.use("/jobs", jobRoutes);
