@@ -95,7 +95,15 @@ export async function requireActiveSession(req, _res, next) {
 
 // One camera frame for the NEXT challenge. Must be uploaded in order, at human speed.
 export async function addFrame(session, file, challengeId) {
-  const discard = () => fs.rm(file.path, { force: true });
+  const discard = () => {
+    if (!file?.path || typeof file.path !== "string") return Promise.resolve();
+    const root = path.resolve(selfieDir);
+    const target = path.resolve(file.path);
+    if (target === root || target.startsWith(root + path.sep)) {
+      return fs.rm(target, { force: true });
+    }
+    return Promise.resolve();
+  };
   try {
     const index = session.frames.length;
     const expected = session.challenges[index];
