@@ -25,7 +25,23 @@ export const status = handler((req) => service.getStatus(req.user.id), 200);
 // --- admin ---
 export const queue = handler(() => service.listPendingReviews(), 200);
 
-export const review = handler((req) => service.reviewSession(req.params.id, req.user.id, req.body), 200, "Decision recorded.");
+export const review = handler((req) => {
+  const { decision, rejectionReason } = req.body || {};
+
+  if (decision !== "approved" && decision !== "rejected") {
+    const error = new Error("Invalid decision.");
+    error.status = 400;
+    throw error;
+  }
+
+  const safeRejectionReason =
+    typeof rejectionReason === "string" ? rejectionReason.trim().slice(0, 500) : undefined;
+
+  return service.reviewSession(req.params.id, req.user.id, {
+    decision,
+    rejectionReason: safeRejectionReason,
+  });
+}, 200, "Decision recorded.");
 
 // GET /verification/selfie/:id/frames/:index — streams the image to an admin (never cached)
 export const frameImage = async (req, res, next) => {
