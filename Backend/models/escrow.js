@@ -24,24 +24,33 @@ const escrowSchema = new mongoose.Schema(
     },
     totalAmount: {
         type: Number,
-        required: true
+        required: true,
+        min: 0
     },
     materialAmount: {
         type: Number,
-        required: true
+        required: true,
+        min: 0
     },
     remainingAmount: {
         type: Number,
-        required: true
+        required: true,
+        min: 0
     },
     heldAmount: {
         type: Number,
-        required: true
+        required: true,
+        min: 0
     },  
     reference: {
         type: String,
         required: true,
         unique: true
+    },
+    paystackReference: {
+        type: String,
+        unique: true,
+        sparse: true
     },
     status: { 
         type: String,
@@ -58,7 +67,7 @@ const escrowSchema = new mongoose.Schema(
         enum: ["pending", "completed", "failed"],
         default: "pending"
     },
-    materialTranferCode: {
+    materialTransferCode: {
         type: String
     },
     finalTransferCode: {
