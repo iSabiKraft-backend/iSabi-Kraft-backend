@@ -3,33 +3,38 @@ import { UPLOAD_ROOT } from './middleware/uploadMiddleware.js';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import authRoutes from './routes/authRoute.js';
+
+// Import all team and personal routes cleanly without duplication
+import authRoutes from './routes/auth.routes.js';
 import disputeRoutes from './routes/disputeRoute.js';
-import jobRoutes from './routes/jobRoute.js';
+import jobRoutes from './routes/jobRoutes.js';
+import quoteRoutes from './routes/quoteRoutes.js';
+import reviewRoutes from './routes/reviewRoutes.js';
 import escrowRoutes from './routes/escrowRoute.js';
-import paymentRoutes from './routes/paymentRoute.js';
+import paymentRoutes from './routes/payment.routes.js';
 import paystackWebhookRoutes from './routes/paystackWebhookRoute.js';
 import termsRoutes from './routes/termsRoute.js';
 import userRoutes from './routes/userRoute.js';
-import artisanRoutes from './routes/artisanRoute.js';
-import adminRoutes from './routes/adminRoute.js';
-import { webhook } from './controllers/paymentController.js';
+import artisanRoutes from './routes/artisan.routes.js';
+import adminRoutes from './routes/admin.routes.js';
+
+import { webhook } from './controllers/payment.controller.js';
 import asyncHandler from './utils/asyncHandler.js';
 import errorHandler from './middleware/error-handler.js';
 
 const app = express();
 
-if (process.env.TRUST_PROXY) app.set('trust proxy', Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY);
+if (process.env.TRUST_PROXY) {
+  app.set('trust proxy', Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY);
+}
 
 app.use(helmet());
 app.use(cors({ origin: process.env.CLIENT_URL ? process.env.CLIENT_URL.split(',') : false }));
 
-// Paystack webhook needs the RAW body to verify its signature, so it must be
-// registered before express.json().
+// Paystack webhook needs the RAW body to verify its signature
 app.post('/api/payments/paystack/webhook', express.raw({ type: 'application/json' }), webhook);
 
-// Uploaded profile photos. helmet's default CORP header would stop the frontend
-// (a different origin) from displaying them, so relax it for this path only.
+// Uploaded profile photos CORS policy relaxation
 app.use(
   '/uploads',
   (_req, res, next) => {
@@ -43,15 +48,20 @@ app.use(express.json({ limit: '1mb' }));
 app.use('/api', rateLimit({ windowMs: 15 * 60 * 1000, limit: 300 }));
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+
+// Mount all routes
 app.use('/api/auth', authRoutes);
 app.use('/api/jobs', jobRoutes);
-app.use("/api/disputes", disputeRoutes);
-app.use('/api/payments', paymentRoutes);
-app.use('/api/artisan', artisanRoutes);
-app.use('/api/admin', adminRoutes);
+app.use('/api/quotes', quoteRoutes);
+app.use('/api/reviews', reviewRoutes);
+app.use('/api/disputes', disputeRoutes);
 app.use('/api/escrow', escrowRoutes);
+app.use('/api/payments', paymentRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/terms', termsRoutes);
+app.use('/api/artisan', artisanRoutes);
+app.use('/api/admin', adminRoutes);
+
 app.use((_req, res) => res.status(404).json({ message: 'Route not found' }));
 app.use(errorHandler);
 
