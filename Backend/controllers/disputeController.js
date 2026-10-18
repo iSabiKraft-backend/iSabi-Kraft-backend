@@ -94,7 +94,16 @@ const disputeStatus = asyncHandler(async (req, res) => {
     }).distinct('_id');
 
     const filter = { passport: { $in: passportIds } };
-    if (req.query.status) filter.status = req.query.status;
+    if (req.query.status !== undefined) {
+        const status = req.query.status;
+        const allowedStatuses = ['open', 'under_review', 'resolved', 'closed'];
+
+        if (typeof status !== 'string' || !allowedStatuses.includes(status)) {
+            throw new errorHandler(400, 'Invalid dispute status');
+        }
+
+        filter.status = { $eq: status };
+    }
 
     const [items, total] = await Promise.all([
         Dispute.find(filter)
