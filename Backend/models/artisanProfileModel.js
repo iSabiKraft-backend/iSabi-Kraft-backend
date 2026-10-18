@@ -10,10 +10,8 @@ export const VERIFICATION_STATUSES = ["not_submitted", "pending", "approved", "r
  *     Payment/Dispute (Dev 3).
  *   - `verificationStatus === "approved"` is the single source of truth for
  *     "this artisan is allowed to receive jobs" — check it, don't re-derive it.
- *   - `avgRating` / `totalReviews` are written ONLY by Dev 2's review
- *     service (inside the same transaction that creates a Review).
+ *   - `avgRating` / `totalReviews` are written ONLY by Dev 2's review service.
  */
-
 const artisanProfileSchema = new mongoose.Schema(
   {
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, unique: true },
@@ -68,4 +66,3 @@ artisanProfileSchema.pre("validate", function () {
 artisanProfileSchema.index({ isAcceptingJobs: 1, verificationTierRank: -1, avgRating: -1 });
 
 export default mongoose.model("ArtisanProfile", artisanProfileSchema);
-

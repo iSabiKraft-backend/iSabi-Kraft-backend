@@ -1,6 +1,18 @@
 import mongoose from "mongoose";
+import { schemaOptions } from "../utils/schemaOptions.js";
 
-//Escrow schema
+export const ESCROW_STATUSES = [
+  "pending",
+  "payment_confirmed",
+  "material_payment_made",
+  "balance_released",
+  "disputed",
+  "refunded",
+  "failed",
+];
+
+// "processing" = a Paystack transfer for that leg has been claimed/started and
+// we're waiting for the webhook. It is what stops a double click paying twice.
 const escrowSchema = new mongoose.Schema(
   {
     customerId: {
@@ -58,14 +70,14 @@ const escrowSchema = new mongoose.Schema(
         default: "pending"
     },
     materialPaymentStatus: {
-        type: String,
-        enum: ["pending", "completed", "failed", "not_applicable"],
-        default: "pending"
+      type: String,
+      enum: ["pending", "processing", "completed", "failed", "not_applicable"],
+      default: "pending",
     },
     balancePaymentStatus: {
-        type: String,
-        enum: ["pending", "completed", "failed"],
-        default: "pending"
+      type: String,
+      enum: ["pending", "processing", "completed", "failed"],
+      default: "pending",
     },
     materialTransferCode: {
         type: String
@@ -77,7 +89,7 @@ const escrowSchema = new mongoose.Schema(
         type: Date
     }
   },
-  { timestamps: true }
+  schemaOptions
 );
 
 export default mongoose.model("Escrow", escrowSchema);

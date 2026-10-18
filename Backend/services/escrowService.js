@@ -10,415 +10,239 @@ import {
     transferToArtisan,
 } from "./paystackService.js";
 
-// Your escrow amounts are assumed to be stored in naira.
-// Paystack requires amounts in kobo.
-const toKobo = (amount) => Math.round(Number(amount) * 100);
+const httpError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
+const toKobo = (naira) => Math.round(Number(naira) * 100);
 
-// FUND ESCROW AFTER VERIFYING THE CUSTOMER'S PAYMENT
-const fundEscrowAccount = async (escrowId, paymentReference) => {
-    try {
-        const escrow = await Escrow.findById(escrowId);
-
-        if (!escrow) {
-            throw new Error("Escrow not found");
-        }
-
-        // Verify the payment directly with Paystack.
-        const payment = await verifyPayment(paymentReference);
-
-        validateVerifiedPaymentData(
-            payment,
-            escrow.totalAmount
-        );
-
-        // Ensure the verified reference is the one supplied.
-        if (payment.reference !== paymentReference) {
-            throw new Error("Paystack payment reference mismatch");
-        }
-
-        // Prevent a payment reference from funding another escrow.
-        const existingTransaction = await EscrowTransaction.findOne({
-            providerReference: payment.reference,
-        });
-
-        if (existingTransaction) {
-            if (
-                existingTransaction.escrowId.toString() !==
-                escrow._id.toString()
-            ) {
-                throw new Error(
-                    "Payment reference is already linked to another escrow"
-                );
-            }
-
-            return escrow;
-        }
-
-        if (escrow.status !== "awaiting_payment") {
-            throw new Error("Escrow is not awaiting payment");
-        }
-
-        // Record the verified incoming payment.
-        await EscrowTransaction.create({
-            escrowId: escrow._id,
-            transactionType: "funding",
-            amount: Number(payment.amount) / 100,
-            status: "completed",
-            providerReference: payment.reference,
-            metadata: {
-                transactionId: payment.id,
-                currency: payment.currency,
-            },
-        });
-
-        escrow.status = "funded";
-        escrow.heldAmount = Number(escrow.totalAmount);
-
-        await escrow.save();
-
-        return escrow;
-    } catch (error) {
-        console.error("Error funding escrow:", error.message);
-        throw error;
-    }
+// Deterministic reference per payout ATTEMPT (escrow + leg + number of earlier failed attempts).
+// Parallel requests all read the same attempt number, so they compute the SAME reference and the
+// unique index on EscrowTransaction.reference lets exactly one through — a double payout is
+// impossible even if the status claim below were to race. (Paystack also rejects a repeated
+// transfer reference.) After a failure the counter is bumped, so a retry gets a fresh reference.
+// Paystack references allow a-z 0-9 - _ = and 16-50 chars.
+// `escrow` must be the document read BEFORE claiming.
+const startTransaction = async (escrow, transactionType, amount) => {
+  const material = transactionType === "material_payment";
+  const attempt = (material ? escrow.materialAttempts : escrow.balanceAttempts) ?? 0;
+  const reference = `isk_${escrow._id}_${material ? "m" : "b"}${attempt}`;
+  try {
+    await EscrowTransaction.create({
+      escrowID: escrow._id,
+      transactionType,
+      amount,
+      currency: escrow.currency,
+      reference,
+      status: "pending",
+    });
+  } catch (error) {
+    if (error.code === 11000) throw httpError("A transfer for this escrow is already in progress", 409);
+    throw error;
+  }
+  return reference;
 };
 
-// RELEASE MATERIAL MONEY TO THE ARTISAN
+// paystackRecipientCode is select:false on the profile, so ask for it explicitly.
+const getArtisanRecipientCode = async (artisanID) => {
+  const artisan = await ArtisanProfile.findById(artisanID).select("+paystackRecipientCode");
+  return artisan?.paystackRecipientCode || null;
+};
+
+// Called once a customer payment has been verified (webhook charge.success or
+// /transaction/verify). `payment` = { reference, amount (in kobo) }.
+const fundEscrowAccount = async (escrowId, payment) => {
+  const existing = await Escrow.findById(escrowId);
+  if (!existing) throw httpError("Escrow not found", 404);
+
+  // Already funded (webhooks are delivered more than once) — nothing to do
+  if (existing.status !== "pending") return existing;
+
+  if (payment.amount !== undefined && Number(payment.amount) !== toKobo(existing.totalAmount)) {
+    throw httpError("Paid amount does not match the escrow total", 400);
+  }
+
+  // Atomic compare-and-set: only ONE concurrent caller moves pending -> payment_confirmed
+  const escrow = await Escrow.findOneAndUpdate(
+    { _id: escrowId, status: "pending" },
+    { status: "payment_confirmed", heldAmount: existing.totalAmount },
+    { new: true }
+  );
+  if (!escrow) return Escrow.findById(escrowId); // lost the race; the winner does the rest
+
+  await EscrowTransaction.updateOne(
+    { reference: payment.reference },
+    {
+      $setOnInsert: {
+        escrowID: escrow._id,
+        transactionType: "funding",
+        amount: escrow.totalAmount,
+        currency: escrow.currency,
+        status: "completed",
+        paidAt: new Date(),
+      },
+    },
+    { upsert: true }
+  );
+
+  // Funds are in: pay the artisan's material allowance straight away
+  try {
+    return await releaseMaterial(escrow._id);
+  } catch (error) {
+    // Escrow is still correctly funded; the material leg is marked failed and can be retried.
+    console.error("Material release failed after funding:", error.message);
+    return Escrow.findById(escrow._id);
+  }
+};
+
+// Material payment release (also used to retry a failed one)
 const releaseMaterial = async (escrowId) => {
-    let reference;
+  const current = await Escrow.findById(escrowId);
+  if (!current) throw httpError("Escrow not found", 404);
+  if (current.status !== "payment_confirmed") throw httpError("Escrow is not funded", 409);
 
-    try {
-        const escrow = await Escrow.findById(escrowId);
+  const claimable = {
+    _id: escrowId,
+    status: "payment_confirmed",
+    materialPaymentStatus: { $in: ["pending", "failed"] },
+  };
 
-        if (!escrow) {
-            throw new Error("Escrow not found");
-        }
+  // No material payment agreed: skip straight to the "material done" state
+  if (current.materialAmount === 0) {
+    const skipped = await Escrow.findOneAndUpdate(
+      claimable,
+      { materialPaymentStatus: "not_applicable", status: "material_payment_made" },
+      { new: true }
+    );
+    if (!skipped) throw httpError("Material payment already processed", 409);
+    return skipped;
+  }
 
-        if (escrow.materialPaymentStatus === "completed") {
-            return escrow;
-        }
+  const recipient = await getArtisanRecipientCode(current.artisanID);
+  if (!recipient) {
+    await Escrow.updateOne(claimable, { materialPaymentStatus: "failed" });
+    throw httpError("Artisan does not have a valid Paystack recipient code", 422);
+  }
 
-        if (escrow.status !== "funded") {
-            throw new Error("Escrow must be funded before materials are paid");
-        }
+  // Atomic claim: a double click / duplicate webhook can't start a second transfer
+  const escrow = await Escrow.findOneAndUpdate(claimable, { materialPaymentStatus: "processing" }, { new: true });
+  if (!escrow) throw httpError("Material payment already processed or in progress", 409);
 
-        // Do not start another transfer while one is pending.
-        const pendingTransaction = await EscrowTransaction.findOne({
-            escrowId: escrow._id,
-            transactionType: "material_payment",
-            status: "pending",
-        });
+  const reference = await startTransaction(current, "material_payment", escrow.materialAmount);
 
-        if (pendingTransaction) {
-            throw new Error(
-                "Material payment is already awaiting confirmation"
-            );
-        }
-
-        const materialAmount = Number(escrow.materialPaymentAmount);
-
-        if (!Number.isFinite(materialAmount) || materialAmount < 0) {
-            throw new Error("Invalid material payment amount");
-        }
-
-        if (materialAmount === 0) {
-            escrow.materialPaymentStatus = "not_applicable";
-            escrow.status = "material_payment_made";
-
-            await escrow.save();
-            return escrow;
-        }
-
-        if (materialAmount > Number(escrow.heldAmount)) {
-            throw new Error("Insufficient escrow balance for materials");
-        }
-
-        const artisan = await User.findById(escrow.artisanId);
-
-        if (!artisan?.paystackRecipientCode) {
-            throw new Error(
-                "Artisan does not have a valid Paystack recipient code"
-            );
-        }
-
-        reference = makeReference();
-
-        // Create the transaction before initiating the transfer.
-        await EscrowTransaction.create({
-            escrowId: escrow._id,
-            transactionType: "material_payment",
-            amount: materialAmount,
-            status: "pending",
-            providerReference: reference,
-        });
-
-        escrow.materialPaymentStatus = "pending";
-        await escrow.save();
-
-        // If this request errors or times out, leave the transaction
-        // pending for reconciliation. Do not assume the transfer failed.
-        const transfer = await transferToArtisan({
-            source: "balance",
-            amount: toKobo(materialAmount),
-            recipient: artisan.paystackRecipientCode,
-            reference,
-        });
-
-        escrow.materialTrasactionCode = transfer.transfer_code;
-        await escrow.save();
-
-        // The verified webhook will update the final transfer status.
-        return escrow;
-    } catch (error) {
-        console.error("Error releasing material payment:", error.message);
-        throw error;
-    }
+  try {
+    const transfer = await transferToArtisan({
+      source: "balance",
+      amount: toKobo(escrow.materialAmount),
+      recipient,
+      reference,
+      reason: "iSabiKraft material payment",
+    });
+    escrow.materialTransferCode = transfer.transfer_code;
+    await escrow.save();
+    // Final success/failure arrives through the transfer.* webhook.
+    return escrow;
+  } catch (error) {
+    await EscrowTransaction.updateOne({ reference }, { status: "failed", metadata: { error: error.message } });
+    escrow.materialPaymentStatus = "failed";
+    escrow.materialAttempts = (current.materialAttempts ?? 0) + 1;
+    await escrow.save();
+    throw error;
+  }
 };
 
-// CUSTOMER CONFIRMS JOB COMPLETION AND RELEASES THE REMAINING BALANCE
-const confirmCompletion = async (jobId, escrowId, customerId) => {
-    try {
-        const job = await Job.findById(jobId);
+// After the customer confirms the job is complete: release the balance
+const confirmCompletion = async (jobID, escrowId, customerID) => {
+  const claimable = {
+    _id: escrowId,
+    jobID,
+    customerID,
+    status: "material_payment_made",
+    balancePaymentStatus: { $in: ["pending", "failed"] },
+  };
 
-        if (
-            !job ||
-            job.customerId?.toString() !== customerId.toString()
-        ) {
-            throw new Error(
-                "Job not found or customer is not authorized"
-            );
-        }
+  const current = await Escrow.findOne({ _id: escrowId, jobID, customerID });
+  if (!current) throw httpError("Escrow not found", 404);
+  if (current.status !== "material_payment_made") throw httpError("Escrow not ready for balance release", 409);
 
-        const escrow = await Escrow.findOne({
-            _id: escrowId,
-            jobId: jobId,
-            customerId,
-        });
+  // Nothing left to pay out
+  if (current.remainingAmount === 0) {
+    const done = await Escrow.findOneAndUpdate(
+      claimable,
+      { balancePaymentStatus: "completed", status: "balance_released", completedAt: new Date() },
+      { new: true }
+    );
+    if (!done) throw httpError("Balance payment is not pending", 409);
+    return done;
+  }
 
-        if (!escrow) {
-            throw new Error("Escrow not found or access denied");
-        }
+  const recipient = await getArtisanRecipientCode(current.artisanID);
+  if (!recipient) {
+    await Escrow.updateOne(claimable, { balancePaymentStatus: "failed" });
+    throw httpError("Artisan does not have a valid Paystack recipient code", 422);
+  }
 
-        if (escrow.status === "balance_released") {
-            return escrow;
-        }
+  const escrow = await Escrow.findOneAndUpdate(claimable, { balancePaymentStatus: "processing" }, { new: true });
+  if (!escrow) throw httpError("Balance payment is not pending", 409);
 
-        if (escrow.status !== "material_payment_made") {
-            throw new Error(
-                "Escrow is not ready for final balance release"
-            );
-        }
+  const reference = await startTransaction(current, "balance_release", escrow.remainingAmount);
 
-        if (
-            !["pending", "failed"].includes(
-                escrow.balancePaymentStatus
-            )
-        ) {
-            throw new Error(
-                "Balance payment cannot be released in its current state"
-            );
-        }
-
-        const remainingAmount = Number(escrow.remainingAmount);
-
-        if (!Number.isFinite(remainingAmount) || remainingAmount < 0) {
-            throw new Error("Invalid remaining balance");
-        }
-
-        if (remainingAmount === 0) {
-            escrow.balancePaymentStatus = "completed";
-            escrow.status = "balance_released";
-            escrow.completedAt = new Date();
-
-            await escrow.save();
-            return escrow;
-        }
-
-        // Avoid starting a duplicate transfer.
-        const pendingTransaction = await EscrowTransaction.findOne({
-            escrowId: escrow._id,
-            transactionType: "balance_release",
-            status: "pending",
-        });
-
-        if (pendingTransaction) {
-            throw new Error(
-                "Balance transfer is already awaiting confirmation"
-            );
-        }
-
-        if (remainingAmount > Number(escrow.heldAmount)) {
-            throw new Error(
-                "Insufficient escrow balance for final payment"
-            );
-        }
-
-        const artisan = await User.findById(escrow.artisanId);
-
-        if (!artisan?.paystackRecipientCode) {
-            throw new Error(
-                "Artisan does not have a valid Paystack recipient code"
-            );
-        }
-
-        const reference = makeReference();
-
-        await EscrowTransaction.create({
-            escrowId: escrow._id,
-            transactionType: "balance_release",
-            amount: remainingAmount,
-            status: "pending",
-            providerReference: reference,
-        });
-
-        escrow.balancePaymentStatus = "pending";
-        escrow.completedAt = new Date();
-
-        await escrow.save();
-
-        const transfer = await transferToArtisan({
-            source: "balance",
-            amount: toKobo(remainingAmount),
-            recipient: artisan.paystackRecipientCode,
-            reference,
-        });
-
-        escrow.finalTransferCode = transfer.transfer_code;
-        await escrow.save();
-
-        // Wait for the verified Paystack webhook before marking it paid.
-        return escrow;
-    } catch (error) {
-        console.error("Error confirming job completion:", error.message);
-        throw error;
-    }
+  try {
+    const transfer = await transferToArtisan({
+      source: "balance",
+      amount: toKobo(escrow.remainingAmount),
+      recipient,
+      reference,
+      reason: "iSabiKraft job balance",
+    });
+    escrow.finalTransferCode = transfer.transfer_code;
+    await escrow.save();
+    return escrow;
+  } catch (error) {
+    await EscrowTransaction.updateOne({ reference }, { status: "failed", metadata: { error: error.message } });
+    escrow.balancePaymentStatus = "failed";
+    escrow.balanceAttempts = (current.balanceAttempts ?? 0) + 1;
+    await escrow.save();
+    throw error;
+  }
 };
 
-// HANDLE PAYSTACK TRANSFER WEBHOOK
-// Call only after verifying the webhook signature in the controller.
+// Verified Paystack webhook events
 const handlePaystackWebhook = async (event, data) => {
-    try {
-        const supportedEvents = [
-            "transfer.success",
-            "transfer.failed",
-            "transfer.reversed",
-        ];
+  // Customer payment succeeded -> fund the escrow that carries this reference
+  if (event === "charge.success") {
+    const escrow = await Escrow.findOne({ reference: data.reference });
+    if (escrow) await fundEscrowAccount(escrow._id, { reference: data.reference, amount: data.amount });
+    return;
+  }
 
-        if (!supportedEvents.includes(event)) {
-            return;
-        }
+  // Paystack's transfer events are transfer.success / transfer.failed / transfer.reversed
+  const succeeded = event === "transfer.success";
+  const failed = event === "transfer.failed" || event === "transfer.reversed";
+  if (!succeeded && !failed) return;
 
-        if (!data?.reference) {
-            throw new Error("Paystack webhook has no transfer reference");
-        }
+  // Atomic: only the first delivery of this webhook finds the transaction still "pending"
+  const transaction = await EscrowTransaction.findOneAndUpdate(
+    { reference: data.reference, status: "pending" },
+    { status: succeeded ? "completed" : "failed", paidAt: succeeded ? new Date() : undefined, metadata: data },
+    { new: true }
+  );
+  if (!transaction) return; // unknown reference or already handled
 
-        const transaction = await EscrowTransaction.findOne({
-            providerReference: data.reference,
-        });
-
-        if (!transaction) {
-            console.warn(
-                "Escrow transaction not found:",
-                data.reference
-            );
-            return;
-        }
-
-        const escrow = await Escrow.findById(transaction.escrowId);
-
-        if (!escrow) {
-            throw new Error("Escrow not found for this transaction");
-        }
-
-        // Ignore duplicate notifications for the same final result.
-        if (
-            transaction.status === "completed" &&
-            event === "transfer.success"
-        ) {
-            return escrow;
-        }
-
-        if (
-            ["failed", "reversed"].includes(transaction.status) &&
-            event !== "transfer.reversed"
-        ) {
-            return escrow;
-        }
-
-        if (event === "transfer.success") {
-            if (transaction.status !== "completed") {
-                transaction.status = "completed";
-
-                if (transaction.transactionType === "material_payment") {
-                    escrow.heldAmount = Math.max(
-                        0,
-                        Number(escrow.heldAmount) -
-                            Number(transaction.amount)
-                    );
-
-                    escrow.materialPaymentStatus = "completed";
-                    escrow.status = "material_payment_made";
-                }
-
-                if (transaction.transactionType === "balance_release") {
-                    escrow.heldAmount = Math.max(
-                        0,
-                        Number(escrow.heldAmount) -
-                            Number(transaction.amount)
-                    );
-
-                    escrow.balancePaymentStatus = "completed";
-                    escrow.status = "balance_released";
-                }
-            }
-        } else if (event === "transfer.failed") {
-            transaction.status = "failed";
-
-            if (transaction.transactionType === "material_payment") {
-                escrow.materialPaymentStatus = "failed";
-                // Escrow remains funded so the transfer can be retried.
-            }
-
-            if (transaction.transactionType === "balance_release") {
-                escrow.balancePaymentStatus = "failed";
-                // The balance can be retried after checking transfer status.
-            }
-        } else if (event === "transfer.reversed") {
-            // Restore the balance only if the transfer had been completed.
-            if (transaction.status === "completed") {
-                escrow.heldAmount =
-                    Number(escrow.heldAmount) +
-                    Number(transaction.amount);
-            }
-
-            transaction.status = "reversed";
-
-            if (transaction.transactionType === "material_payment") {
-                escrow.materialPaymentStatus = "failed";
-                escrow.status = "funded";
-            }
-
-            if (transaction.transactionType === "balance_release") {
-                escrow.balancePaymentStatus = "failed";
-                escrow.status = "material_payment_made";
-            }
-        }
-
-        transaction.metadata = data;
-
-        await transaction.save();
-        await escrow.save();
-
-        return escrow;
-    } catch (error) {
-        console.error("Error handling Paystack webhook:", error.message);
-        throw error;
-    }
+  // On failure the escrow status is left as-is (funds are still held) so the
+  // failed leg can simply be retried.
+  if (transaction.transactionType === "material_payment") {
+    await Escrow.updateOne(
+      { _id: transaction.escrowID },
+      succeeded
+        ? { materialPaymentStatus: "completed", status: "material_payment_made" }
+        : { materialPaymentStatus: "failed", $inc: { materialAttempts: 1 } }
+    );
+  } else if (transaction.transactionType === "balance_release") {
+    await Escrow.updateOne(
+      { _id: transaction.escrowID },
+      succeeded
+        ? { balancePaymentStatus: "completed", status: "balance_released", completedAt: new Date() }
+        : { balancePaymentStatus: "failed", $inc: { balanceAttempts: 1 } }
+    );
+  }
 };
 
-export {
-    fundEscrowAccount,
-    releaseMaterial,
-    confirmCompletion,
-    handlePaystackWebhook,
-};
+export { fundEscrowAccount, releaseMaterial, confirmCompletion, handlePaystackWebhook };

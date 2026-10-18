@@ -16,7 +16,7 @@ import {
   addPortfolioItemValidator,
   submitVerificationValidator,
   reviewVerificationValidator,
-  artisanIdParamValidator
+  artisanIdParamValidator,
 } from "../validators/artisanValidator.js";
 
 const route = express.Router();

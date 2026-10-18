@@ -1,4 +1,10 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import User from "../models/userModel.js";
+import { httpError } from "../utils/httpError.js";
+import { normalizePhone, splitFullName } from "../utils/identifier.js";
+import { resolveLocation } from "../utils/nigeriaLocations.js";
+import { UPLOAD_ROOT } from "../middleware/uploadMiddleware.js";
 
 // Get the logged-in user's own record
 export async function getMe(userId) {
@@ -26,11 +32,57 @@ export async function updateMe(userId, updates) {
   }
 
   // Whitelist — never let a request body change role, email, isActive, etc.
-  for (const key of ["firstName", "lastName", "phone"]) {
+  for (const key of ["firstName", "lastName"]) {
     if (updates[key] !== undefined) user[key] = updates[key];
+  }
+  if (updates.phone !== undefined) {
+    const phone = normalizePhone(updates.phone);
+    if (!phone) throw httpError("Provide a valid phone number.", 400);
+    if (phone !== user.phone) {
+      user.phone = phone;
+      user.phoneVerified = false; // a new number has to be re-verified
+    }
   }
   await user.save();
 
+  return user.toJSON();
+}
+
+// Step 2 of 2 — "Complete Your Profile": name, state, LGA, date of birth, optional address.
+export async function completeProfile(userId, { fullName, state, lga, dateOfBirth, address }) {
+  const user = await User.findById(userId);
+  if (!user) throw httpError("User not found.", 404);
+
+  const location = resolveLocation(state, lga);
+  if (!location) throw httpError("Choose a supported state and one of its LGAs.", 400);
+
+  if (fullName) Object.assign(user, splitFullName(fullName));
+  user.state = location.state;
+  user.lga = location.lga;
+  user.dateOfBirth = new Date(dateOfBirth);
+  user.address = address || null;
+  user.profileCompleted = true;
+  await user.save();
+
+  return user.toJSON();
+}
+
+// Profile photo. `file` comes from the upload middleware (already type/size checked).
+export async function setAvatar(userId, file) {
+  const user = await User.findById(userId);
+  if (!user) {
+    await fs.rm(file.path, { force: true });
+    throw httpError("User not found.", 404);
+  }
+
+  const previous = user.avatarUrl;
+  user.avatarUrl = `/uploads/avatars/${file.filename}`;
+  await user.save();
+
+  // Remove the old local file (never touches external URLs, e.g. a Google picture)
+  if (previous?.startsWith("/uploads/avatars/")) {
+    await fs.rm(path.join(UPLOAD_ROOT, "avatars", path.basename(previous)), { force: true });
+  }
   return user.toJSON();
 }
 
@@ -51,4 +103,3 @@ export async function listUsers({ role, page = 1, pageSize = 20 }) {
 
   return { items, total, page: currentPage, pageSize: limit };
 }
-
