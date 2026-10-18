@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import axios from "axios";
 import Escrow from "../models/escrow.js";
 import Job from "../models/job.js";
 import {
@@ -82,7 +83,7 @@ const createEscrow = async (req,res) => {
 
 
     // Do not allow another escrow for the same job.
-    const existingEscrow = await Escrow.findById({jobId})
+    const existingEscrow = await Escrow.findOne({jobId})
     if (existingEscrow){
         return res.status(400).json({
             success: false,
@@ -125,55 +126,196 @@ const createEscrow = async (req,res) => {
 
 
 //Verify customer PAYSTACK payment 
+
 const fundEscrow = async (req, res) => {
-    try{
-        const {escrowId} = req.params;
-        const {reference} = req.body;
+    try {
+        const { escrowId } = req.params;
+        const { reference } = req.body;
         const customerId = getUserId(req);
 
-        // Check if customer is authenticated
+        // 1. Authenticate customer
         if (!customerId) {
             return res.status(401).json({
                 success: false,
-                message: "Unauthorized"
+                message: "Unauthorized",
             });
         }
-        // Check if escrow is valid
-       if (!isValidId(escrowId)) {
+
+        // 2. Validate escrow ID
+        if (!isValidObjectId(escrowId)) {
             return res.status(400).json({
                 success: false,
-                message: "Invalid escrow ID"
+                message: "Invalid escrow ID",
             });
-       }
+        }
 
-       if (typeof reference != "string" ||
-        !reference.trim()
-       ){
-        return res.status(400).json({
-            success: false,
-            message: "Invalid reference, paystack payment reference is required"
+        // 3. Validate Paystack reference
+        if (typeof reference !== "string" || !reference.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: "Paystack payment reference is required",
+            });
+        }
+
+        if (!process.env.PAYSTACK_SECRET_KEY) {
+            console.error("PAYSTACK_SECRET_KEY is not configured");
+
+            return res.status(500).json({
+                success: false,
+                message: "Payment service is not configured",
+            });
+        }
+
+        // 4. Find escrow belonging to this customer
+        const escrowRecord = await Escrow.findOne({
+            _id: escrowId,
+            customerId,
         });
-       }
 
-       //Make sure only the customer that owns an escrow can fund it
-       const escrow = await Escrow.findOne({
-        _id: escrowId,
-        customerId
-       });
+        if (!escrowRecord) {
+            return res.status(404).json({
+                success: false,
+                message: "Escrow not found",
+            });
+        }
 
-       if (!escrow) {
-        return res.status(404).json({
-            success: false,
-            message: "Escrow not found"
+        // 5. Prevent funding an already funded escrow
+        if (
+            escrowRecord.status !== "awaiting_payment" ||
+            Number(escrowRecord.heldAmount) > 0
+        ) {
+            return res.status(409).json({
+                success: false,
+                message: "This escrow is not awaiting payment",
+                data: {
+                    escrowId: escrowRecord._id,
+                    status: escrowRecord.status,
+                    heldAmount: escrowRecord.heldAmount,
+                },
+            });
+        }
+
+        // 6. Verify the transaction directly with Paystack
+        let paystackResponse;
+
+        try {
+            console.log("Verifying Paystack transaction:", reference);
+            paystackResponse = await axios.get(
+                `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference.trim())}`,
+                {
+                    headers: {
+                        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+                    },
+                    timeout: 15000,
+                }
+            );
+        } catch (error) {
+            if (error.response?.status === 400 ||
+                error.response?.status === 404) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Paystack transaction could not be verified",
+                });
+            }
+
+            console.error(
+                "Paystack verification error:",
+                error.response?.data || error.message
+            );
+
+            return res.status(502).json({
+                success: false,
+                message: "Unable to verify payment with Paystack. Please retry.",
+            });
+        }
+
+        const transaction = paystackResponse.data?.data;
+
+        // 7. Confirm successful payment
+        if (
+            paystackResponse.data?.status !== true ||
+            transaction?.status !== "success"
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Payment has not been completed successfully",
+            });
+        }
+
+        // 8. Confirm reference, amount, and currency
+        const expectedAmountKobo = Math.round(
+            Number(escrowRecord.totalAmount) * 100
+        );
+
+        if (
+            transaction.reference !== reference.trim() ||
+            transaction.amount !== expectedAmountKobo ||
+            transaction.currency !== "NGN"
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Payment details do not match this escrow",
+            });
+        }
+
+        // 9. Prevent reusing a transaction for a different escrow.
+        // This requires your Escrow schema to store paystackReference.
+        const referenceUsed = await Escrow.findOne({
+            paystackReference: reference.trim(),
+            _id: { $ne: escrowRecord._id },
         });
-       }
 
+        if (referenceUsed) {
+            return res.status(409).json({
+                success: false,
+                message: "This payment reference has already been used",
+            });
+        }
+
+        // 10. Atomically update the escrow.
+        // Only one concurrent request can fund an awaiting escrow.
+        const updatedEscrow = await Escrow.findOneAndUpdate(
+            {
+                _id: escrowRecord._id,
+                customerId,
+                status: "awaiting_payment",
+                heldAmount: 0,
+            },
+            {
+                $set: {
+                    heldAmount: escrowRecord.totalAmount,
+                    status: "funded",
+                    paystackReference: reference.trim(),
+                    fundedAt: new Date(),
+                },
+            },
+            {
+                new: true,
+                runValidators: true,
+            }
+        );
+
+        if (!updatedEscrow) {
+            return res.status(409).json({
+                success: false,
+                message: "Escrow was already funded or its status changed",
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Escrow funded successfully",
+            data: updatedEscrow,
+        });
+    } catch (error) {
+        console.error("Error funding escrow:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fund escrow",
+        });
     }
-    catch(error){
-        console.error("Error verifying customer PAYSTACK payment:", error);
-        res.status(500).json({ message: "Internal server error" });
-    }
-}
+};
 
 
 // Initiate the materials payment
@@ -191,7 +333,7 @@ const initiateMaterialPayment = async (req, res) => {
         }
         
         // Check if escrow is valid
-        if (!isValidId(escrowId)) {
+        if (!isValidObjectId(escrowId)) {
             return res.status(400).json({
                 success: false,
                 message: "Invalid escrow ID"
@@ -338,7 +480,7 @@ const confirmJobCompletion = async (req, res) => {
         }
         
         // Check if escrow is valid
-        if (!isValidId(escrowId)) {
+        if (!isValidObjectId(escrowId)) {
             return res.status(400).json({
                 success: false,
                 message: "Invalid escrow ID"
@@ -396,7 +538,7 @@ const getEscrowById = async ( req, res) => {
             });
         }
         
-        if (!isValidId(escrowId)) {
+        if (!isValidObjectId(escrowId)) {
             return res.status(400).json({
                 success: false,
                 message: "Invalid escrow ID"

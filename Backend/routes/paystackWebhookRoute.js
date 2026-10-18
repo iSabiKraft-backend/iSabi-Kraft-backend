@@ -1,5 +1,5 @@
 import express from "express";
-import { paystackWebhook } from "../controllers/paystackWebhook.controller.js";
+import { paystackWebhook } from "../controllers/paystackWebhookController.js";
 
 const router = express.Router();
 

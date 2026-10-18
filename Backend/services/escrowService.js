@@ -1,7 +1,14 @@
 import Escrow from "../models/escrow.js";
 import EscrowTransaction from "../models/escrowTransaction.js";
-import ArtisanProfile from "../models/artisanProfileModel.js";
-import { transferToArtisan } from "./paystackService.js";
+import User from "../models/userModel.js";
+import Job from "../models/job.js";
+
+import {
+    makeReference,
+    verifyPayment,
+    validateVerifiedPaymentData,
+    transferToArtisan,
+} from "./paystackService.js";
 
 const httpError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
 const toKobo = (naira) => Math.round(Number(naira) * 100);
