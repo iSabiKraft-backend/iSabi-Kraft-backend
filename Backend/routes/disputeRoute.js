@@ -9,8 +9,7 @@ import {
 } from "../controllers/disputeController.js";
 
 import {
-    authenticateUser,
-    authorizeRoles
+    authenticateUser
 } from "../middleware/authMiddleware.js";
 
 const router = express.Router();

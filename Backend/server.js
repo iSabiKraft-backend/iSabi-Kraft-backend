@@ -1,6 +1,5 @@
-import 'dotenv/config';
-import app from './app.js';
 import { validateEnv } from './config/env.js';
+import app from './app.js';
 import connectDB from './config/db.js';
 import { purgeExpired } from './services/selfieVerificationService.js';
 

@@ -17,6 +17,11 @@ export const quoteValidator = [
     .isFloat({ min: 0 })
     .withMessage("Material amount must be a non-negative number"),
 
+  body("additionalAmount")
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage("Additional amount must be a non-negative number"),
+
   body("scope")
     .trim()
     .notEmpty()
@@ -32,6 +37,13 @@ export const quoteValidator = [
     .bail()
     .isLength({ max: 100 })
     .withMessage("Estimated duration cannot exceed 100 characters"),
+
+  body("guaranteeTerms")
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 2000 })
+    .withMessage("Guarantee terms cannot exceed 2000 characters"),
 
   body("expiresAt")
     .optional({ nullable: true })

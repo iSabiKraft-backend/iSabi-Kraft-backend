@@ -35,8 +35,10 @@ export const createQuote = async (jobID, artisanID, data) => {
   const {
     labourAmount,
     materialAmount,
+    additionalAmount = 0,
     scope,
     estimatedDuration,
+    guaranteeTerms = "",
     expiresAt,
   } = data;
 
@@ -71,8 +73,10 @@ export const createQuote = async (jobID, artisanID, data) => {
     artisanID,
     labourAmount,
     materialAmount,
+    additionalAmount,
     scope,
     estimatedDuration,
+    guaranteeTerms,
     expiresAt,
   });
 };
@@ -94,13 +98,20 @@ export const getJobQuotes = async (jobID, customerID) => {
 };
 
 // Retrieve one quote
-export const getQuoteById = async (quoteID) => {
+export const getQuoteById = async (quoteID, userID) => {
   const quote = await Quote.findById(quoteID)
     .populate("artisanID", "firstName lastName")
     .populate("jobID");
 
   if (!quote) {
     throw createError("Quote not found", 404);
+  }
+
+  if (
+    String(quote.jobID.customerID) !== String(userID) &&
+    String(quote.artisanID._id) !== String(userID)
+  ) {
+    throw createError("You are not authorized to view this quote", 403);
   }
 
   return quote;
@@ -142,8 +153,31 @@ export const acceptQuote = async (quoteID, customerID) => {
       quote.status = "accepted";
       quote.acceptedAt = new Date();
 
+      await Quote.updateMany(
+        { jobID: job._id, _id: { $ne: quote._id }, status: "pending" },
+        { $set: { status: "rejected" } },
+        { session }
+      );
+
       job.status = "quote_accepted";
       job.artisanID = quote.artisanID;
+      job.agreement = {
+        quoteID: quote._id,
+        labourAmount: quote.labourAmount,
+        materialAmount: quote.materialAmount,
+        additionalAmount: quote.additionalAmount ?? 0,
+        totalAmount: quote.totalAmount,
+        scope: quote.scope,
+        estimatedDuration: quote.estimatedDuration,
+        guaranteeTerms: quote.guaranteeTerms ?? "",
+        acceptedAt: quote.acceptedAt,
+      };
+      job.passportEvents.push({
+        type: "quote_accepted",
+        actorID: customerID,
+        message: "Customer accepted the artisan's quote.",
+        metadata: { quoteID: quote._id, totalAmount: quote.totalAmount },
+      });
 
       await quote.save({ session });
       await job.save({ session });

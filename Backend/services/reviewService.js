@@ -1,6 +1,7 @@
 
 import Review from "../models/reviewModel.js";
 import Job from "../models/jobModel.js";
+import ArtisanProfile from "../models/artisanProfileModel.js";
 
 const createError = (message, statusCode) => {
   const error = new Error(message);
@@ -16,6 +17,23 @@ const getReviewOrThrow = async (reviewID) => {
   }
 
   return review;
+};
+
+const refreshArtisanRating = async (artisanID) => {
+  const [summary] = await Review.aggregate([
+    { $match: { artisanID } },
+    { $group: { _id: "$artisanID", average: { $avg: "$rating" }, count: { $sum: 1 } } },
+  ]);
+
+  await ArtisanProfile.updateOne(
+    { userId: artisanID },
+    {
+      $set: {
+        avgRating: summary ? Math.round(summary.average * 100) / 100 : 0,
+        totalReviews: summary?.count ?? 0,
+      },
+    }
+  );
 };
 
 // Submit a review for a completed job
@@ -58,13 +76,15 @@ export const createReview = async (jobID, customerID, data) => {
     throw createError("You have already reviewed this job", 409);
   }
 
-  return Review.create({
+  const review = await Review.create({
     jobID: job._id,
     customerID,
     artisanID: job.artisanID,
     rating,
     comment,
   });
+  await refreshArtisanRating(job.artisanID);
+  return review;
 };
 
 // Retrieve reviews for an artisan
@@ -114,6 +134,7 @@ export const updateReview = async (
   }
 
   await review.save();
+  await refreshArtisanRating(review.artisanID);
 
   return review;
 };
@@ -130,6 +151,7 @@ export const deleteReview = async (reviewID, customerID) => {
   }
 
   await review.deleteOne();
+  await refreshArtisanRating(review.artisanID);
 
   return { message: "Review deleted successfully" };
 };

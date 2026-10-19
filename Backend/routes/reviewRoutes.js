@@ -9,6 +9,8 @@ import {
 } from "../controllers/reviewController.js";
 
 import asyncHandler from "../utils/asyncHandler.js";
+import { authenticateUser } from "../middleware/authMiddleware.js";
+import { authorizeRoles } from "../middleware/roleMiddleware.js";
 
 import {
   reviewValidator,
@@ -37,6 +39,8 @@ const artisanIdParamValidator = [
 // Create a review for a completed job
 router.post(
   "/jobs/:jobId",
+  authenticateUser,
+  authorizeRoles("customer"),
   jobIdParamValidator,
   reviewValidator,
   validateRequest,
@@ -62,6 +66,8 @@ router.get(
 // Update a review
 router.patch(
   "/:id",
+  authenticateUser,
+  authorizeRoles("customer"),
   reviewIdValidator,
   updateReviewValidator,
   validateRequest,
@@ -72,6 +78,8 @@ router.patch(
 // Delete a review
 router.delete(
   "/:id",
+  authenticateUser,
+  authorizeRoles("customer"),
   reviewIdValidator,
   validateRequest,
   asyncHandler(deleteReview)

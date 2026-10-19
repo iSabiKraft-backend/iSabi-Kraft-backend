@@ -17,6 +17,9 @@ import {
 } from "../validators/quoteValidator.js";
 
 import { param } from "express-validator";
+import { authenticateUser } from "../middleware/authMiddleware.js";
+import { authorizeRoles } from "../middleware/roleMiddleware.js";
+import { requireTermsAccepted } from "../middleware/termsMiddleware.js";
 
 const router = express.Router();
 
@@ -30,6 +33,9 @@ const jobIdParamValidator = [
 // Submit a quote for a job
 router.post(
   "/jobs/:jobId",
+  authenticateUser,
+  authorizeRoles("artisan"),
+  requireTermsAccepted,
   jobIdParamValidator,
   quoteValidator,
   validateRequest,
@@ -39,6 +45,8 @@ router.post(
 // Get all quotes for a specific job
 router.get(
   "/jobs/:jobId",
+  authenticateUser,
+  authorizeRoles("customer"),
   jobIdParamValidator,
   validateRequest,
   asyncHandler(getJobQuotes)
@@ -47,6 +55,7 @@ router.get(
 // Get a single quote
 router.get(
   "/:id",
+  authenticateUser,
   quoteIdValidator,
   validateRequest,
   asyncHandler(getQuoteById)
@@ -55,6 +64,9 @@ router.get(
 // Accept a quote
 router.patch(
   "/:id/accept",
+  authenticateUser,
+  authorizeRoles("customer"),
+  requireTermsAccepted,
   quoteIdValidator,
   validateRequest,
   asyncHandler(acceptQuote)
@@ -63,6 +75,8 @@ router.patch(
 // Reject a quote
 router.patch(
   "/:id/reject",
+  authenticateUser,
+  authorizeRoles("customer"),
   quoteIdValidator,
   validateRequest,
   asyncHandler(rejectQuote)
@@ -71,6 +85,8 @@ router.patch(
 // Withdraw a quote
 router.patch(
   "/:id/withdraw",
+  authenticateUser,
+  authorizeRoles("artisan"),
   quoteIdValidator,
   validateRequest,
   asyncHandler(withdrawQuote)

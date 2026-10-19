@@ -79,6 +79,8 @@ const escrowSchema = new mongoose.Schema(
       enum: ["pending", "processing", "completed", "failed"],
       default: "pending",
     },
+    materialAttempts: { type: Number, default: 0, min: 0 },
+    balanceAttempts: { type: Number, default: 0, min: 0 },
     materialTransferCode: {
         type: String
     },
@@ -91,5 +93,7 @@ const escrowSchema = new mongoose.Schema(
   },
   schemaOptions
 );
+
+escrowSchema.index({ jobId: 1 }, { unique: true });
 
 export default mongoose.model("Escrow", escrowSchema);

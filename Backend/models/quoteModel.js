@@ -30,6 +30,12 @@ const quoteSchema = new Schema(
       min: [0, "Material amount cannot be negative"],
     },
 
+    additionalAmount: {
+      type: Number,
+      default: 0,
+      min: [0, "Additional amount cannot be negative"],
+    },
+
     totalAmount: {
       type: Number,
       required: true,
@@ -49,6 +55,13 @@ const quoteSchema = new Schema(
       required: [true, "Estimated duration is required"],
       trim: true,
       maxlength: [100, "Estimated duration cannot exceed 100 characters"],
+    },
+
+    guaranteeTerms: {
+      type: String,
+      trim: true,
+      maxlength: [2000, "Guarantee terms cannot exceed 2000 characters"],
+      default: "",
     },
 
     status: {
@@ -85,9 +98,8 @@ quoteSchema.index(
 quoteSchema.index({ jobID: 1, status: 1, createdAt: -1 });
 
 // Calculate total from labour + materials before validation.
-quoteSchema.pre("validate", function (next) {
-  this.totalAmount = this.labourAmount + this.materialAmount;
-  next();
+quoteSchema.pre("validate", function () {
+  this.totalAmount = this.labourAmount + this.materialAmount + this.additionalAmount;
 });
 
 const Quote = model("Quote", quoteSchema);

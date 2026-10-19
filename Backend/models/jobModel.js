@@ -3,6 +3,32 @@ import mongoose from "mongoose";
 
 const { Schema, model } = mongoose;
 
+const passportEventSchema = new Schema({
+  type: { type: String, required: true, maxlength: 80 },
+  actorID: { type: Schema.Types.ObjectId, ref: "User", default: null },
+  message: { type: String, required: true, trim: true, maxlength: 1000 },
+  metadata: { type: Schema.Types.Mixed, default: {} },
+  createdAt: { type: Date, default: Date.now },
+}, { _id: true });
+
+const changeRequestSchema = new Schema({
+  proposedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
+  description: { type: String, required: true, trim: true, maxlength: 2000 },
+  priceAdjustment: { type: Number, default: 0 },
+  scheduleAdjustment: { type: String, default: "", trim: true, maxlength: 500 },
+  status: { type: String, enum: ["pending", "approved", "rejected"], default: "pending" },
+  decidedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+  decidedAt: { type: Date, default: null },
+  createdAt: { type: Date, default: Date.now },
+}, { _id: true });
+
+const completionEvidenceSchema = new Schema({
+  url: { type: String, required: true, trim: true, maxlength: 2048 },
+  note: { type: String, default: "", trim: true, maxlength: 1000 },
+  submittedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
+  submittedAt: { type: Date, default: Date.now },
+}, { _id: true });
+
 const jobSchema = new Schema(
   {
     customerID: {
@@ -125,6 +151,41 @@ const jobSchema = new Schema(
       type: Date,
       default: null,
     },
+
+    completionStatus: {
+      type: String,
+      enum: ["pending", "artisan_marked_complete", "customer_confirmed"],
+      default: "pending",
+    },
+
+    artisanCompletedAt: { type: Date, default: null },
+    artisanCompletionNote: { type: String, default: "", maxlength: 1000 },
+
+    // Job Passport: immutable baseline accepted by the customer.
+    agreement: {
+      quoteID: { type: Schema.Types.ObjectId, ref: "Quote", default: null },
+      labourAmount: { type: Number, min: 0, default: null },
+      materialAmount: { type: Number, min: 0, default: null },
+      additionalAmount: { type: Number, min: 0, default: 0 },
+      changeAdjustmentTotal: { type: Number, default: 0 },
+      totalAmount: { type: Number, min: 0, default: null },
+      scope: { type: String, default: "", maxlength: 2000 },
+      estimatedDuration: { type: String, default: "", maxlength: 100 },
+      guaranteeTerms: { type: String, default: "", maxlength: 2000 },
+      acceptedAt: { type: Date, default: null },
+    },
+    paymentStatus: {
+      type: String,
+      enum: ["unpaid", "pending", "partially_paid", "paid", "refunded", "failed"],
+      default: "unpaid",
+    },
+    progress: {
+      stage: { type: String, enum: ["not_started", "materials", "work_started", "quality_check", "completion_submitted"], default: "not_started" },
+      updatedAt: { type: Date, default: null },
+    },
+    changeRequests: { type: [changeRequestSchema], default: [] },
+    completionEvidence: { type: [completionEvidenceSchema], default: [] },
+    passportEvents: { type: [passportEventSchema], default: [] },
 
     cancelledAt: {
       type: Date,

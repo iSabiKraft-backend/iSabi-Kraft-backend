@@ -4,21 +4,24 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 
-// Import all team and personal routes cleanly without duplication
-import authRoutes from './routes/auth.routes.js';
+// Team routes (singular Route.js convention)
+import authRoutes from './routes/authRoute.js';
 import disputeRoutes from './routes/disputeRoute.js';
+import escrowRoutes from './routes/escrowRoute.js';
+import paymentRoutes from './routes/paymentRoute.js';
+import termsRoutes from './routes/termsRoute.js';
+import userRoutes from './routes/userRoute.js';
+import artisanRoutes from './routes/artisanRoute.js';
+import adminRoutes from './routes/adminRoute.js';
+
+// Your new modules (plural routes.js convention)
 import jobRoutes from './routes/jobRoutes.js';
 import quoteRoutes from './routes/quoteRoutes.js';
 import reviewRoutes from './routes/reviewRoutes.js';
-import escrowRoutes from './routes/escrowRoute.js';
-import paymentRoutes from './routes/payment.routes.js';
-import paystackWebhookRoutes from './routes/paystackWebhookRoute.js';
-import termsRoutes from './routes/termsRoute.js';
-import userRoutes from './routes/userRoute.js';
-import artisanRoutes from './routes/artisan.routes.js';
-import adminRoutes from './routes/admin.routes.js';
+import locationRoutes from './routes/locationRoute.js';
+import selfieVerificationRoutes from './routes/selfieVerificationRoute.js';
 
-import { webhook } from './controllers/payment.controller.js';
+import { paystackWebhook } from './controllers/paystackWebhookController.js';
 import asyncHandler from './utils/asyncHandler.js';
 import errorHandler from './middleware/error-handler.js';
 
@@ -32,7 +35,7 @@ app.use(helmet());
 app.use(cors({ origin: process.env.CLIENT_URL ? process.env.CLIENT_URL.split(',') : false }));
 
 // Paystack webhook needs the RAW body to verify its signature
-app.post('/api/payments/paystack/webhook', express.raw({ type: 'application/json' }), webhook);
+app.post('/api/payments/paystack/webhook', express.raw({ type: 'application/json' }), paystackWebhook);
 
 // Uploaded profile photos CORS policy relaxation
 app.use(
@@ -54,6 +57,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/jobs', jobRoutes);
 app.use('/api/quotes', quoteRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/locations', locationRoutes);
+app.use('/api/verification/selfie', selfieVerificationRoutes);
 app.use('/api/disputes', disputeRoutes);
 app.use('/api/escrow', escrowRoutes);
 app.use('/api/payments', paymentRoutes);

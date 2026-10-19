@@ -29,7 +29,7 @@ export const getJobQuotes = async (req, res) => {
 };
 
 export const getQuoteById = async (req, res) => {
-  const quote = await quoteService.getQuoteById(req.params.id);
+  const quote = await quoteService.getQuoteById(req.params.id, req.user.id);
 
   return res.status(200).json({
     success: true,

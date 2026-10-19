@@ -25,6 +25,12 @@ export const createJob = async (customerID, data) => {
     location,
     photos,
     preferredStartDate,
+    passportEvents: [{
+      type: "job_created",
+      actorID: customerID,
+      message: "Customer created the job brief.",
+      createdAt: new Date(),
+    }],
   });
 };
 
@@ -41,13 +47,22 @@ export const getMyJobs = async (customerID) => {
 };
 
 // Get a single job by ID
-export const getJobById = async (jobID) => {
+export const getJobById = async (jobID, user) => {
   const job = await Job.findById(jobID)
     .populate("customerID", "firstName lastName")
     .populate("artisanID", "firstName lastName");
 
   if (!job) {
     throw createError("Job not found", 404);
+  }
+
+  const customerID = job.customerID?._id ?? job.customerID;
+  const artisanID = job.artisanID?._id ?? job.artisanID;
+  const isOwner = String(customerID) === String(user.id);
+  const isAssignedArtisan = artisanID && String(artisanID) === String(user.id);
+  const isArtisanBrowsingOpenJob = user.role === "artisan" && job.status === "open";
+  if (!isOwner && !isAssignedArtisan && !isArtisanBrowsingOpenJob && user.role !== "admin") {
+    throw createError("You are not authorized to view this job", 403);
   }
 
   return job;
@@ -84,6 +99,12 @@ export const updateJob = async (jobID, customerID, data) => {
     }
   }
 
+  job.passportEvents.push({
+    type: "job_brief_updated",
+    actorID: customerID,
+    message: "Customer updated the job brief.",
+  });
+
   await job.save();
   return job;
 };
@@ -109,6 +130,11 @@ export const cancelJob = async (jobID, customerID) => {
 
   job.status = "cancelled";
   job.cancelledAt = new Date();
+  job.passportEvents.push({
+    type: "job_cancelled",
+    actorID: customerID,
+    message: "Customer cancelled the job.",
+  });
 
   await job.save();
   return job;

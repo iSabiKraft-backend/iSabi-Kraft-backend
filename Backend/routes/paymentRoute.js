@@ -3,12 +3,14 @@ import express from "express";
 
 import {
     initializePaymentController,
-    verifyPayment,
+    verifyPaymentController,
     getPaymentHistory,
     getPayment
 } from "../controllers/paymentController.js";
 
 import { authenticateUser } from "../middleware/authMiddleware.js";
+import { authorizeRoles } from "../middleware/roleMiddleware.js";
+import { requireTermsAccepted } from "../middleware/termsMiddleware.js";
 
 const router = express.Router();
 
@@ -16,6 +18,8 @@ const router = express.Router();
 router.post(
     "/initialize",
     authenticateUser,
+    authorizeRoles("customer"),
+    requireTermsAccepted,
     initializePaymentController
 );
 
@@ -23,13 +27,15 @@ router.post(
 router.get(
     "/verify/:reference",
     authenticateUser,
-    verifyPayment
+    authorizeRoles("customer"),
+    verifyPaymentController
 );
 
 // Get payment history
 router.get(
-    "/history/:userId",
+    "/history",
     authenticateUser,
+    authorizeRoles("customer"),
     getPaymentHistory
 );
 
@@ -37,6 +43,7 @@ router.get(
 router.get(
     "/:paymentId",
     authenticateUser,
+    authorizeRoles("customer"),
     getPayment
 );
 
