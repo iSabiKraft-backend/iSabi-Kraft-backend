@@ -83,13 +83,10 @@ export const loginValidator = [
 // "Forgot Password?"
 export const forgotPasswordValidator = [identifierField()];
 
-export const resetTokenQueryValidator = [
-  query("token").isString().matches(/^[a-f0-9]{64}$/).withMessage("Invalid reset link"),
-];
-
-// "Create New Password"
+// "Create New Password" — 6-digit code sent to email/SMS
 export const resetPasswordValidator = [
-  body("token").isString().matches(/^[a-f0-9]{64}$/).withMessage("Invalid reset link"),
+  identifierField(),
+  body("code").isString().trim().matches(/^\d{6}$/).withMessage("Enter the 6-digit code"),
   passwordRules("password", "New password"),
   confirmMatches("password", "confirmPassword", "Passwords"),
 ];
