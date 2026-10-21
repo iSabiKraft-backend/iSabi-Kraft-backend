@@ -13,10 +13,12 @@ import {
 } from "../controllers/jobController.js";
 
 import asyncHandler from "../utils/asyncHandler.js";
+import * as jobService from "../services/jobService.js";
 import { body, param } from "express-validator";
 import { authenticateUser } from "../middleware/authMiddleware.js";
 import { authorizeRoles } from "../middleware/roleMiddleware.js";
 import { requireTermsAccepted } from "../middleware/termsMiddleware.js";
+import { uploadMedia, uploadPhotos } from "../middleware/cloudinaryUploadMiddleware.js";
 import {
   jobValidator,
   updateJobValidator,
@@ -42,9 +44,13 @@ const changeDecisionValidator = [
 ];
 const completionValidator = [
   body("note").optional().isString().trim().isLength({ max: 1000 }).withMessage("Completion note cannot exceed 1000 characters"),
-  body("evidence").isArray({ min: 1 }).withMessage("At least one completion evidence item is required"),
-  body("evidence.*.url").isURL({ require_protocol: true }).withMessage("Evidence URL must be valid"),
-  body("evidence.*.note").optional().isString().trim().isLength({ max: 1000 }),
+  body("evidence").optional().custom((value) => {
+    if (Array.isArray(value)) return true;
+    if (typeof value === "string") {
+      try { return Array.isArray(JSON.parse(value)); } catch { return false; }
+    }
+    return false;
+  }).withMessage("Evidence must be a JSON array when provided"),
 ];
 
 // Create a job
@@ -56,6 +62,35 @@ router.post(
   jobValidator,
   validateRequest,
   asyncHandler(createJob)
+);
+
+// Upload photos for the customer's job request/brief
+router.post(
+  "/:id/photos",
+  authenticateUser,
+  authorizeRoles("customer"),
+  requireTermsAccepted,
+  jobIdValidator,
+  validateRequest,
+  uploadPhotos,
+  asyncHandler(async (req, res) => {
+    const job = await jobService.addJobPhotos(req.params.id, req.user.id, req.files);
+    return res.status(201).json({ success: true, message: "Job request photos uploaded.", data: job });
+  })
+);
+
+// Upload photos to the Job Passport
+router.post(
+  "/:id/passport/photos",
+  authenticateUser,
+  requireTermsAccepted,
+  jobIdValidator,
+  validateRequest,
+  uploadPhotos,
+  asyncHandler(async (req, res) => {
+    const job = await jobService.addPassportPhotos(req.params.id, req.user, req.files);
+    return res.status(201).json({ success: true, message: "Job Passport photos uploaded.", data: job });
+  })
 );
 
 // Get all open jobs
@@ -82,6 +117,7 @@ router.patch(
   jobIdValidator,
   progressValidator,
   validateRequest,
+  uploadPhotos,
   asyncHandler(updateJobProgress)
 );
 
@@ -115,6 +151,7 @@ router.post(
   jobIdValidator,
   completionValidator,
   validateRequest,
+  uploadMedia,
   asyncHandler(submitJobCompletion)
 );
 

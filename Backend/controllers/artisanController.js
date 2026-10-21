@@ -1,6 +1,7 @@
 import * as artisanService from "../services/artisanService.js";
+import { httpError } from "../utils/httpError.js";
 
-
+//This is for artisan search 
 export const search = async (req, res, next) => {
   try {
     const result = await artisanService.searchArtisans(req.query);
@@ -42,6 +43,24 @@ export const addPortfolioItem = async (req, res, next) => {
     return res.status(201).json({
       success: true,
       message: "Portfolio item added successfully.",
+      data: item,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /artisans/me/portfolio/upload — multipart/form-data, field "image"
+export const uploadPortfolioPhoto = async (req, res, next) => {
+  try {
+    const caption = typeof req.body.caption === "string" ? req.body.caption.trim() : null;
+    if (caption && caption.length > 200) throw httpError("Caption must be 200 characters or fewer.", 400);
+
+    const item = await artisanService.addPortfolioPhoto(req.user.id, req.file, caption);
+
+    return res.status(201).json({
+      success: true,
+      message: "Portfolio photo uploaded successfully.",
       data: item,
     });
   } catch (error) {

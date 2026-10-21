@@ -1,33 +1,98 @@
-export const errorHandler = (error, req, res, next) => {
-  console.error(error.errors || error);
+const errorHandler = (err, req, res, _next) => {
+  console.error(err.errors || err);
 
-  let statusCode = error.statusCode || error.status || 500;
-  let message = error.message || 'Internal Server Error';
+  let statusCode = err.statusCode || err.status || 500;
+  let message = err.message || "Internal Server Error";
 
-  // Mongoose / MongoDB errors -> proper client errors instead of 500s
-  if (error.code === 11000) {
+  // Mongoose validation errors
+  if (err.name === "ValidationError") {
+    statusCode = 400;
+
+    const errors = Object.values(err.errors || {}).map(
+      (error) => error.message
+    );
+
+    message = errors.length
+      ? "Validation failed"
+      : message;
+
+    const response = {
+      success: false,
+      message,
+      ...(errors.length > 0 && { errors }),
+      ...err.extra,
+    };
+
+    if (process.env.NODE_ENV === "development") {
+      response.stack = err.stack;
+    }
+
+    return res.status(statusCode).json(response);
+  }
+
+  // MongoDB duplicate key error
+  if (err.code === 11000) {
     statusCode = 409;
-    const fields = Object.keys(error.keyPattern || error.keyValue || {}).join(', ');
-    message = `A record with this ${fields || 'value'} already exists.`;
-  } else if (error.name === 'ValidationError') {
-    statusCode = 400;
-    message = Object.values(error.errors || {}).map((e) => e.message).join('; ') || message;
-  } else if (error.name === 'MulterError') {
-    statusCode = 400;
-    message = error.code === 'LIMIT_FILE_SIZE' ? 'Image is too large (max 2 MB).' : error.message;
-  } else if (error.name === 'CastError') {
-    statusCode = 400;
-    message = `Invalid ${error.path || 'value'}.`;
+
+    const fields = Object.keys(
+      err.keyPattern || err.keyValue || {}
+    );
+
+    message = fields.length
+      ? `${fields.join(", ")} already exists`
+      : "Duplicate resource";
+
+    // Retain any additional application error metadata.
+    const response = {
+      success: false,
+      message,
+      ...err.extra,
+    };
+
+    if (process.env.NODE_ENV === "development") {
+      response.stack = err.stack;
+    }
+
+    return res.status(statusCode).json(response);
   }
 
-  // extra fields from httpError(), e.g. { requiresVerification: true } or { resendAvailableInSeconds: 42 }
-  const response = { success: false, message, ...error.extra };
-
-  if (process.env.NODE_ENV === 'development') {
-    response.stack = error.stack;
+  // Invalid MongoDB ObjectId or cast error
+  if (err.name === "CastError") {
+    statusCode = 400;
+    message = `Invalid ${err.path || "resource ID"}.`;
   }
 
-  res.status(statusCode).json(response);
+  // Multer file upload errors
+  if (err.name === "MulterError") {
+    statusCode = 400;
+
+    if (err.code === "LIMIT_FILE_SIZE") {
+      message = "Uploaded file exceeds the configured size limit.";
+    } else if (err.code === "LIMIT_FILE_COUNT") {
+      message = "Too many files uploaded.";
+    } else if (err.code === "LIMIT_UNEXPECTED_FILE") {
+      message = "Unexpected file field.";
+    } else {
+      message = err.message || "File upload failed.";
+    }
+  }
+
+  // Build the standard error response
+  const response = {
+    success: false,
+    message:
+      statusCode >= 500 && process.env.NODE_ENV !== "development"
+        ? "An unexpected error occurred"
+        : message,
+    ...err.extra,
+  };
+
+  // Include stack traces only in development
+  if (process.env.NODE_ENV === "development") {
+    response.stack = err.stack;
+  }
+
+  return res.status(statusCode).json(response);
 };
 
 export default errorHandler;

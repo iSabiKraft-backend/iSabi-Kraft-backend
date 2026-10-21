@@ -1,10 +1,8 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import User from "../models/userModel.js";
 import { httpError } from "../utils/httpError.js";
 import { normalizePhone, splitFullName } from "../utils/identifier.js";
 import { resolveLocation } from "../utils/nigeriaLocations.js";
-import { UPLOAD_ROOT } from "../middleware/uploadMiddleware.js";
+import { uploadBufferToCloudinary, deleteCloudinaryAsset } from "../utils/cloudinary.js";
 
 // Get the logged-in user's own record
 export async function getMe(userId) {
@@ -67,24 +65,35 @@ export async function completeProfile(userId, { fullName, state, lga, dateOfBirt
   return user.toJSON();
 }
 
-// Profile photo. `file` comes from the upload middleware (already type/size checked).
-export async function setAvatar(userId, file) {
-  const user = await User.findById(userId);
-  if (!user) {
-    await fs.rm(file.path, { force: true });
-    throw httpError("User not found.", 404);
-  }
+// Profile photo is stored in Cloudinary; only the URL is exposed publicly.
+export const setAvatar = async (userId, file) => {
+  if (!file?.buffer) throw httpError("Avatar file is required.", 400);
 
-  const previous = user.avatarUrl;
-  user.avatarUrl = `/uploads/avatars/${file.filename}`;
+  const user = await User.findById(userId).select("+avatarPublicId");
+  if (!user) throw httpError("User not found.", 404);
+
+  const previousPublicId = user.avatarPublicId;
+  const uploaded = await uploadBufferToCloudinary(file.buffer, {
+    folder: "isabikraft/avatars",
+    resourceType: "image",
+  });
+
+  user.avatarUrl = uploaded.secure_url;
+  user.avatarPublicId = uploaded.public_id;
   await user.save();
 
-  // Remove the old local file (never touches external URLs, e.g. a Google picture)
-  if (previous?.startsWith("/uploads/avatars/")) {
-    await fs.rm(path.join(UPLOAD_ROOT, "avatars", path.basename(previous)), { force: true });
+  // Delete the old asset only after the database points to the new one.
+  if (previousPublicId && previousPublicId !== uploaded.public_id) {
+    try {
+      await deleteCloudinaryAsset(previousPublicId, "image");
+    } catch (error) {
+      // Do not fail the successful avatar update because cleanup failed.
+      console.error("Failed to delete previous Cloudinary avatar:", error.message);
+    }
   }
+
   return user.toJSON();
-}
+};
 
 // List users — admin only, backs the admin dashboard's user-management view
 export async function listUsers({ role, page = 1, pageSize = 20 }) {

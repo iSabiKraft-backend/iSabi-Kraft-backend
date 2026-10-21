@@ -23,7 +23,7 @@ import selfieVerificationRoutes from './routes/selfieVerificationRoute.js';
 
 import { paystackWebhook } from './controllers/paystackWebhookController.js';
 import asyncHandler from './utils/asyncHandler.js';
-import errorHandler from './middleware/error-handler.js';
+import errorHandler from './middleware/errorHandler.js';
 
 const app = express();
 

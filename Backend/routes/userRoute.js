@@ -5,6 +5,7 @@ import { authorizeRoles } from "../middleware/roleMiddleware.js";
 import { updateUserValidator, completeProfileValidator } from "../validators/userValidator.js";
 import { validateRequest } from "../middleware/validationMiddleware.js";
 import { uploadAvatar as avatarUpload } from "../middleware/uploadMiddleware.js";
+import { uploadCloudinaryImage } from "../middleware/cloudinaryUploadMiddleware.js";
 
 const route = express.Router();
 
@@ -16,7 +17,7 @@ route.patch("/me", authenticateUser, updateUserValidator, validateRequest, updat
 route.put("/me/profile", authenticateUser, completeProfileValidator, validateRequest, completeProfile);
 
 // Profile photo (multipart/form-data, field "avatar")
-route.post("/me/avatar", authenticateUser, ...avatarUpload, uploadAvatar);
+route.post("/me/avatar", authenticateUser, ...uploadCloudinaryImage("Avatar"), uploadAvatar);
 
 // admin-only user list, for the admin dashboard
 route.get("/", authenticateUser, authorizeRoles("admin"), listUsers);

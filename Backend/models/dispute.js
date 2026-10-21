@@ -4,6 +4,8 @@ import { schemaOptions } from "../utils/schemaOptions.js";
 const evidenceSchema = new mongoose.Schema(
   {
     url: { type: String, required: true, trim: true, maxlength: 2048 },
+    publicId: { type: String, trim: true, maxlength: 500, default: "" },
+    resourceType: { type: String, enum: ["image", "video"], default: "image" },
     note: { type: String, trim: true, maxlength: 1000, default: "" },
   },
   { _id: false }

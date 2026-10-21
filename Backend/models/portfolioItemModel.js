@@ -9,6 +9,7 @@ const portfolioItemSchema = new mongoose.Schema(
   {
     artisanProfileId: { type: mongoose.Schema.Types.ObjectId, ref: "ArtisanProfile", required: true, index: true },
     url: { type: String, required: true, trim: true },
+    publicId: { type: String, default: null },
     type: { type: String, enum: ["photo", "video"], required: true },
     caption: { type: String, maxlength: 200, trim: true, default: null },
   },

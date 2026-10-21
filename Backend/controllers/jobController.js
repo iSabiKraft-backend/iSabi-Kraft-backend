@@ -55,7 +55,7 @@ export const getJobById = async (req, res) => {
 };
 
 export const updateJobProgress = async (req, res) => {
-  const job = await jobPassportService.updateProgress(req.params.id, req.user, req.body);
+  const job = await jobPassportService.updateProgress(req.params.id, req.user, { ...req.body, files: req.files ?? [] });
   return res.status(200).json({ success: true, message: "Job progress updated.", data: job });
 };
 
@@ -70,7 +70,12 @@ export const decideJobChange = async (req, res) => {
 };
 
 export const submitJobCompletion = async (req, res) => {
-  const job = await jobPassportService.submitCompletion(req.params.id, req.user, req.body);
+  const body = { ...req.body, files: req.files ?? [] };
+  if (typeof body.evidence === "string") {
+    try { body.evidence = JSON.parse(body.evidence); }
+    catch { body.evidence = []; }
+  }
+  const job = await jobPassportService.submitCompletion(req.params.id, req.user, body);
   return res.status(200).json({ success: true, message: "Completion evidence submitted for customer review.", data: job });
 };
 

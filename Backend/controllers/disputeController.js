@@ -9,27 +9,42 @@ const isParticipant = (job, userId) =>
   String(job.customerID) === String(userId) || String(job.artisanID) === String(userId);
 
 const getDisputeOrThrow = async (id, populateJob = false) => {
-  if (!mongoose.isValidObjectId(id)) throw httpError("Invalid dispute ID", 400);
+  if (!mongoose.isValidObjectId(id)) 
+    throw httpError("Invalid dispute ID", 400);
   const query = Dispute.findById(id);
+  
   if (populateJob) query.populate("job", "title status customerID artisanID");
   const dispute = await query;
+  
   if (!dispute) throw httpError("Dispute not found", 404);
   return dispute;
 };
 
 export const createDispute = asyncHandler(async (req, res) => {
   const { jobId, reason, description, evidence = [] } = req.body ?? {};
-  if (!mongoose.isValidObjectId(jobId)) throw httpError("A valid job ID is required", 400);
-  if (typeof reason !== "string" || !reason.trim()) throw httpError("A dispute reason is required", 400);
-  if (typeof description !== "string" || !description.trim()) throw httpError("A dispute description is required", 400);
-  if (!Array.isArray(evidence) || evidence.some((item) => !item || typeof item.url !== "string" || !item.url.trim())) {
+  if (!mongoose.isValidObjectId(jobId)) 
+    throw httpError("A valid job ID is required", 400);
+  
+  if (typeof reason !== "string" || !reason.trim()) 
+    throw httpError("A dispute reason is required", 400);
+  
+  if (typeof description !== "string" || !description.trim()) 
+    throw httpError("A dispute description is required", 400);
+  
+  if (!Array.isArray(evidence) || 
+  evidence.some((item) => !item || 
+  typeof item.url !== "string" || 
+  !item.url.trim())) {
     throw httpError("Evidence must be an array of items with a URL", 400);
   }
 
   const job = await Job.findById(jobId);
   if (!job) throw httpError("Job not found", 404);
+  
   if (!isParticipant(job, req.user.id)) throw httpError("You are not a participant in this job", 403);
-  if (!job.artisanID || !["in_progress", "completed", "disputed"].includes(job.status)) {
+  
+  if (!job.artisanID ||
+  !["in_progress", "completed", "disputed"].includes(job.status)) {
     throw httpError("A dispute can only be opened for an active or completed job", 409);
   }
 

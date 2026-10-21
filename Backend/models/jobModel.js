@@ -24,9 +24,17 @@ const changeRequestSchema = new Schema({
 
 const completionEvidenceSchema = new Schema({
   url: { type: String, required: true, trim: true, maxlength: 2048 },
+  publicId: { type: String, default: "", trim: true, maxlength: 500 },
+  resourceType: { type: String, enum: ["image", "video"], default: "image" },
   note: { type: String, default: "", trim: true, maxlength: 1000 },
   submittedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
   submittedAt: { type: Date, default: Date.now },
+}, { _id: true });
+
+const mediaSchema = new Schema({
+  url: { type: String, required: true, trim: true, maxlength: 2048 },
+  publicId: { type: String, required: true, trim: true, maxlength: 500 },
+  resourceType: { type: String, enum: ["image", "video"], required: true },
 }, { _id: true });
 
 const jobSchema = new Schema(
@@ -114,20 +122,30 @@ const jobSchema = new Schema(
       },
     },
     photos: {
-      type: [
-        {
-          type: String,
-          trim: true,
-          maxlength: [2048, "Photo URL is too long"],
-        },
-      ],
+      type: [mediaSchema],
       default: [],
       validate: {
-        validator: (photos) => photos.length <= 5,
-        message: "A job cannot have more than 5 photos",
+        validator: (photos) => photos.length <= 5 && photos.every((item) => item.resourceType === "image"),
+        message: "A job can have no more than 5 photos",
       },
     },
 
+    passportPhotos: {
+      type: [mediaSchema],
+      default: [],
+      validate: {
+        validator: (photos) => photos.length <= 5 && photos.every((item) => item.resourceType === "image"),
+        message: "A job passport can have no more than 5 photos",
+      },
+    },
+    videos: {
+      type: [mediaSchema],
+      default: [],
+      validate: {
+        validator: (videos) => videos.length <= 3 && videos.every((item) => item.resourceType === "video"),
+        message: "A job cannot have more than 3 videos",
+      },
+    },
     status: {
       type: String,
       enum: [
@@ -180,6 +198,7 @@ const jobSchema = new Schema(
       default: "unpaid",
     },
     progress: {
+      photos: { type: [mediaSchema], default: [], validate: { validator: (photos) => photos.length <= 5 && photos.every((item) => item.resourceType === "image"), message: "Job progress can have no more than 5 photos" } },
       stage: { type: String, enum: ["not_started", "materials", "work_started", "quality_check", "completion_submitted"], default: "not_started" },
       updatedAt: { type: Date, default: null },
     },

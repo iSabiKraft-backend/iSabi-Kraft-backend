@@ -1,4 +1,5 @@
 import Job from "../models/jobModel.js";
+import { uploadFilesToCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
 
 const createError = (message, statusCode) => {
   const error = new Error(message);
@@ -13,7 +14,7 @@ export const createJob = async (customerID, data) => {
     description,
     category,
     location,
-    photos,
+    photos = [],
     preferredStartDate,
   } = data;
 
@@ -140,3 +141,48 @@ export const cancelJob = async (jobID, customerID) => {
   return job;
 };
 
+
+export const addJobPhotos = async (jobID, customerID, files = []) => {
+  const job = await Job.findById(jobID);
+  if (!job) throw createError("Job not found", 404);
+  if (String(job.customerID) !== String(customerID)) throw createError("You are not authorized to modify this job", 403);
+  if (job.status !== "open") throw createError("Only open jobs can receive job request photos", 400);
+  if (job.photos.length + files.length > 5) throw createError("A job cannot have more than 5 photos", 400);
+  const media = await uploadFilesToCloudinary(files, { folder: `isabikraft/jobs/${job._id}/request` });
+  job.photos.push(...media.filter((item) => item.resourceType === "image"));
+  await job.save();
+  return job;
+};
+
+export const addPassportPhotos = async (jobID, user, files = []) => {
+  const job = await Job.findById(jobID);
+  if (!job) throw createError("Job not found", 404);
+  const participant = String(job.customerID) === String(user.id) || String(job.artisanID) === String(user.id);
+  if (!participant && user.role !== "admin") throw createError("You are not authorized to modify this job passport", 403);
+  if (job.passportPhotos.length + files.length > 5) throw createError("A job passport can have no more than 5 photos", 400);
+  const media = await uploadFilesToCloudinary(files, { folder: `isabikraft/jobs/${job._id}/passport` });
+  job.passportPhotos.push(...media.filter((item) => item.resourceType === "image"));
+  await job.save();
+  return job;
+};
+
+export const removeJobMedia = async (jobID, user, publicId) => {
+  const job = await Job.findById(jobID);
+  if (!job) throw createError("Job not found", 404);
+  const participant = String(job.customerID) === String(user.id) || String(job.artisanID) === String(user.id);
+  if (!participant && user.role !== "admin") throw createError("You are not authorized to modify this job", 403);
+
+  const collections = [job.photos, job.passportPhotos, job.progress?.photos, job.videos, job.completionEvidence].filter(Boolean);
+  let found = null;
+  for (const collection of collections) {
+    found = collection.find((item) => item.publicId === publicId);
+    if (found) {
+      collection.pull(found._id);
+      break;
+    }
+  }
+  if (!found) throw createError("Media not found", 404);
+  await deleteFromCloudinary(found.publicId, found.resourceType);
+  await job.save();
+  return job;
+};

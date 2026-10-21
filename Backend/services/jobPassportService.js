@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Job from "../models/jobModel.js";
 import { httpError } from "../utils/httpError.js";
+import { uploadFilesToCloudinary } from "../utils/cloudinary.js";
 
 const PROGRESS_STAGES = ["materials", "work_started", "quality_check"];
 
@@ -36,13 +37,19 @@ export const getJobPassport = async (jobId, user) => {
   return job;
 };
 
-export const updateProgress = async (jobId, user, { stage, note }) => {
+export const updateProgress = async (jobId, user, { stage, note, files = [] }) => {
   const job = await getPassportOrThrow(jobId);
   const { isArtisan } = assertParticipant(job, user);
   if (!isArtisan) throw httpError("Only the assigned artisan can update job progress", 403);
   if (job.status !== "in_progress") throw httpError("Progress can only be updated while the job is in progress", 409);
   if (!PROGRESS_STAGES.includes(stage)) throw httpError("Invalid progress stage", 400);
 
+  if (job.progress.photos.length + files.length > 5) throw httpError("Job progress can have no more than 5 photos", 400);
+  if (files.some((file) => !file.mimetype.startsWith("image/"))) throw httpError("Job progress accepts photos only", 400);
+  if (files.length) {
+    const media = await uploadFilesToCloudinary(files, { folder: `isabikraft/jobs/${job._id}/progress` });
+    job.progress.photos.push(...media.filter((item) => item.resourceType === "image"));
+  }
   job.progress.stage = stage;
   job.progress.updatedAt = new Date();
   appendEvent(job, "progress_updated", user.id, note?.trim() || `Progress updated to ${stage}.`, { stage });
@@ -102,22 +109,38 @@ export const decideChange = async (jobId, changeId, user, decision) => {
   return change;
 };
 
-export const submitCompletion = async (jobId, user, { note = "", evidence = [] }) => {
+export const submitCompletion = async (jobId, user, { note = "", evidence = [], files = [] }) => {
   const job = await getPassportOrThrow(jobId);
   const { isArtisan } = assertParticipant(job, user);
   if (!isArtisan) throw httpError("Only the assigned artisan can submit completion evidence", 403);
   if (job.status !== "in_progress" || job.completionStatus !== "pending") throw httpError("The job is not ready for completion submission", 409);
-  if (!Array.isArray(evidence) || evidence.length === 0 || evidence.some((item) => typeof item?.url !== "string" || !item.url.trim())) {
-    throw httpError("Submit at least one completion evidence URL", 400);
+  if (evidence.length === 0 && files.length === 0) {
+    throw httpError("Submit at least one completion photo or video", 400);
   }
+  if (evidence.some((item) => typeof item?.url !== "string" || !item.url.trim())) {
+    throw httpError("Completion evidence URLs must be valid", 400);
+  }
+  if (files.length > 8) throw httpError("A completion submission can contain no more than 8 media files", 400);
+  const uploaded = files.length
+    ? await uploadFilesToCloudinary(files, { folder: `isabikraft/jobs/${job._id}/completion` })
+    : [];
 
   const now = new Date();
-  job.completionEvidence.push(...evidence.map(({ url, note: evidenceNote }) => ({
-    url: url.trim(),
-    note: typeof evidenceNote === "string" ? evidenceNote.trim() : "",
-    submittedBy: user.id,
-    submittedAt: now,
-  })));
+  job.completionEvidence.push(
+    ...evidence.map(({ url, note: evidenceNote }) => ({
+      url: url.trim(),
+      note: typeof evidenceNote === "string" ? evidenceNote.trim() : "",
+      submittedBy: user.id,
+      submittedAt: now,
+    })),
+    ...uploaded.map(({ url, publicId, resourceType }) => ({
+      url,
+      publicId,
+      resourceType,
+      submittedBy: user.id,
+      submittedAt: now,
+    }))
+  );
   job.completionStatus = "artisan_marked_complete";
   job.artisanCompletedAt = now;
   job.artisanCompletionNote = note.trim();
