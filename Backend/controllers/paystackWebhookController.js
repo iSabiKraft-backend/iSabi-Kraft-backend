@@ -1,16 +1,29 @@
 import { validWebHookSignature } from "../services/paystackService.js";
-import { handlePaystackWebhook } from "../services/escrow.service.js";
+import { handlePaystackWebhook } from "../services/escrowService.js";
 
 const paystackWebhook = async (req, res) => {
+  const rawBody = req.body;
+  const signature = req.headers["x-paystack-signature"];
+
   // Always validate the signature before processing the event.
-  if (!validWebHookSignature(req)) {
+  if (!Buffer.isBuffer(rawBody) || !validWebHookSignature(rawBody, signature)) {
     return res.status(401).json({
       success: false,
       message: "Invalid Paystack webhook signature",
     });
   }
 
-  const { event, data } = req.body;
+  let payload;
+  try {
+    payload = JSON.parse(rawBody.toString("utf8"));
+  } catch {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid webhook payload",
+    });
+  }
+
+  const { event, data } = payload;
   // Validate event and data
   if (!event || !data) {
     return res.status(400).json({

@@ -1,4 +1,17 @@
-import 'dotenv/config';
+import dotenv from "dotenv";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const backendDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const projectDirectory = resolve(backendDirectory, "..");
+
+// Support the documented root .env and Backend/.env; root values take precedence.
+dotenv.config({
+  path: [
+    resolve(projectDirectory, ".env"),
+    resolve(backendDirectory, ".env"),
+  ],
+});
 
 const required = ['MONGODB_URI', 'JWT_SECRET', 'PAYSTACK_SECRET_KEY'];
 
