@@ -22,11 +22,8 @@ export const resendVerification = handler((req) => authService.resendVerificatio
 // POST /auth/login
 export const login = handler((req) => authService.loginUser(req.body), 200, "Login successful.");
 
-// POST /auth/forgot-password — "Send Reset Link"
-export const forgotPassword = handler((req) => authService.forgotPassword(req.body), 200, "If the account exists, a reset link has been sent.");
-
-// GET /auth/reset-password/validate?token=...
-export const validateResetToken = handler((req) => authService.validateResetToken(req.query.token), 200);
+// POST /auth/forgot-password — "Send reset code"
+export const forgotPassword = handler((req) => authService.forgotPassword(req.body), 200, "If the account exists, a reset code has been sent.");
 
 // POST /auth/reset-password — "Reset Password"
 export const resetPassword = handler((req) => authService.resetPassword(req.body), 200, "Password reset successfully.");
