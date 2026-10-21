@@ -70,30 +70,35 @@ export async function getVerificationCooldown(userId) {
   return cooldownLeft(await Otp.findOne({ userId, purpose: "verify" }));
 }
 
-// Create + send a password-reset link. Returns { resendAvailableInSeconds, link };
-// during the cooldown nothing is sent (link is null) and the caller still answers 200.
-export async function issueResetLink(user, channel, destination) {
+// Create + send a 6-digit password-reset code. Returns { resendAvailableInSeconds, code }.
+export async function issueResetCode(user, channel, destination) {
   const existing = await Otp.findOne({ userId: user._id, purpose: "reset" });
   const wait = cooldownLeft(existing);
-  if (wait > 0) return { resendAvailableInSeconds: wait, link: null };
+  if (wait > 0) return { resendAvailableInSeconds: wait, code: null };
 
-  const token = crypto.randomBytes(32).toString("hex");
-  await upsert(user._id, "reset", channel, destination, hash(token), RESET_TTL_SECONDS);
+  const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
+  await upsert(user._id, "reset", channel, destination, hash(code), RESET_TTL_SECONDS);
 
-  const base = (process.env.RESET_URL_BASE || process.env.CLIENT_URL?.split(",")[0] || "http://localhost:3000").replace(/\/$/, "");
-  const link = `${base}/reset-password?token=${token}`;
   await send(channel, destination, {
     subject: "Reset your iSabiKraft password",
-    text: `Reset your iSabiKraft password using this link (valid for ${Math.round(RESET_TTL_SECONDS / 60)} minutes): ${link}`,
+    text: `Your iSabiKraft reset code is ${code}. It expires in ${Math.round(RESET_TTL_SECONDS / 60)} minutes. Don't share it with anyone.`,
   });
 
-  return { resendAvailableInSeconds: RESEND_COOLDOWN_SECONDS, link };
+  return { resendAvailableInSeconds: RESEND_COOLDOWN_SECONDS, code };
 }
 
-// Look up a reset token without consuming it (used when the reset screen opens).
-export async function findResetToken(token) {
-  const record = await Otp.findOne({ purpose: "reset", codeHash: hash(token) });
-  if (!record || record.expiresAt <= new Date()) throw httpError("This reset link is invalid or has expired.", 400);
+// Look up a reset code for a specific user without consuming it.
+export async function findResetCode(userId, code) {
+  const record = await Otp.findOne({ userId, purpose: "reset" });
+  if (!record || record.expiresAt <= new Date()) {
+    throw httpError("This reset code is invalid or has expired.", 400);
+  }
+
+  if (!safeEqual(record.codeHash, hash(code))) {
+    await Otp.updateOne({ _id: record._id }, { $inc: { attempts: 1 } });
+    throw httpError("This reset code is invalid or has expired.", 400);
+  }
+
   return record;
 }
 
