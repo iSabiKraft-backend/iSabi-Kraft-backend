@@ -10,6 +10,7 @@ import {
   proposeJobChange,
   decideJobChange,
   submitJobCompletion,
+  getJobCompletionEvidence,
 } from "../controllers/jobController.js";
 
 import asyncHandler from "../utils/asyncHandler.js";
@@ -17,6 +18,10 @@ import { body, param } from "express-validator";
 import { authenticateUser } from "../middleware/authMiddleware.js";
 import { authorizeRoles } from "../middleware/roleMiddleware.js";
 import { requireTermsAccepted } from "../middleware/termsMiddleware.js";
+import {
+  requireCompletionEvidenceAccess,
+  uploadCompletionEvidence,
+} from "../middleware/completionEvidenceUploadMiddleware.js";
 import {
   jobValidator,
   updateJobValidator,
@@ -40,13 +45,6 @@ const changeDecisionValidator = [
   param("changeId").isMongoId().withMessage("Invalid change request ID"),
   body("decision").isIn(["approved", "rejected"]).withMessage("Decision must be approved or rejected"),
 ];
-const completionValidator = [
-  body("note").optional().isString().trim().isLength({ max: 1000 }).withMessage("Completion note cannot exceed 1000 characters"),
-  body("evidence").isArray({ min: 1 }).withMessage("At least one completion evidence item is required"),
-  body("evidence.*.url").isURL({ require_protocol: true }).withMessage("Evidence URL must be valid"),
-  body("evidence.*.note").optional().isString().trim().isLength({ max: 1000 }),
-];
-
 // Create a job
 router.post(
   "/",
@@ -113,9 +111,19 @@ router.post(
   authorizeRoles("artisan"),
   requireTermsAccepted,
   jobIdValidator,
-  completionValidator,
   validateRequest,
+  requireCompletionEvidenceAccess,
+  ...uploadCompletionEvidence,
   asyncHandler(submitJobCompletion)
+);
+
+router.get(
+  "/:id/completion/evidence/:evidenceId",
+  authenticateUser,
+  jobIdValidator,
+  param("evidenceId").isMongoId().withMessage("Invalid evidence ID"),
+  validateRequest,
+  asyncHandler(getJobCompletionEvidence)
 );
 
 // Update a job

@@ -1,5 +1,6 @@
 import * as jobService from "../services/jobService.js";
 import * as jobPassportService from "../services/jobPassportService.js";
+import fs from "node:fs";
 
 /**
  * Create a new job
@@ -70,8 +71,34 @@ export const decideJobChange = async (req, res) => {
 };
 
 export const submitJobCompletion = async (req, res) => {
-  const job = await jobPassportService.submitCompletion(req.params.id, req.user, req.body);
+  const files = (req.files ?? []).map((file) => ({ ...file, note: req.body?.note }));
+  const job = await jobPassportService.submitCompletion(req.params.id, req.user, {
+    note: req.body?.note ?? "",
+    files,
+  });
   return res.status(200).json({ success: true, message: "Completion evidence submitted for customer review.", data: job });
+};
+
+export const getJobCompletionEvidence = async (req, res, next) => {
+  try {
+    const { file, mimeType } = await jobPassportService.getCompletionEvidenceFile(
+      req.params.id,
+      req.params.evidenceId,
+      req.user
+    );
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader("Content-Disposition", "inline");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    const stream = fs.createReadStream(file);
+    stream.on("error", () => {
+      if (res.headersSent) return res.end();
+      next(new Error("Completion evidence file could not be read"));
+    });
+    stream.pipe(res);
+  } catch (error) {
+    next(error);
+  }
 };
 
 /**

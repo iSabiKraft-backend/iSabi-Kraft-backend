@@ -1,6 +1,9 @@
 import mongoose from "mongoose";
+import fs from "node:fs/promises";
+import path from "node:path";
 import Job from "../models/jobModel.js";
 import { httpError } from "../utils/httpError.js";
+import { completionEvidenceDir } from "../middleware/completionEvidenceUploadMiddleware.js";
 
 const PROGRESS_STAGES = ["materials", "work_started", "quality_check"];
 
@@ -30,10 +33,25 @@ const appendEvent = (job, type, actorID, message, metadata = {}) => {
   job.passportEvents.push({ type, actorID, message, metadata, createdAt: new Date() });
 };
 
+const passportResponse = (job) => {
+  const result = job.toObject();
+  result.completionEvidence = result.completionEvidence.map((item) => ({
+    _id: item._id,
+    url: item.url ?? null,
+    note: item.note,
+    submittedBy: item.submittedBy,
+    submittedAt: item.submittedAt,
+    ...(item.filename && {
+      downloadUrl: `/api/jobs/${job._id}/completion/evidence/${item._id}`,
+    }),
+  }));
+  return result;
+};
+
 export const getJobPassport = async (jobId, user) => {
   const job = await getPassportOrThrow(jobId);
   assertParticipant(job, user);
-  return job;
+  return passportResponse(job);
 };
 
 export const updateProgress = async (jobId, user, { stage, note }) => {
@@ -102,28 +120,64 @@ export const decideChange = async (jobId, changeId, user, decision) => {
   return change;
 };
 
-export const submitCompletion = async (jobId, user, { note = "", evidence = [] }) => {
-  const job = await getPassportOrThrow(jobId);
-  const { isArtisan } = assertParticipant(job, user);
-  if (!isArtisan) throw httpError("Only the assigned artisan can submit completion evidence", 403);
-  if (job.status !== "in_progress" || job.completionStatus !== "pending") throw httpError("The job is not ready for completion submission", 409);
-  if (!Array.isArray(evidence) || evidence.length === 0 || evidence.some((item) => typeof item?.url !== "string" || !item.url.trim())) {
-    throw httpError("Submit at least one completion evidence URL", 400);
-  }
+export const submitCompletion = async (jobId, user, { note = "", files = [] }) => {
+  try {
+    if (!mongoose.isValidObjectId(jobId)) throw httpError("Invalid job ID", 400);
+    if (!Array.isArray(files) || files.length === 0 || files.length > 5) throw httpError("Upload between one and five completion evidence images", 400);
 
-  const now = new Date();
-  job.completionEvidence.push(...evidence.map(({ url, note: evidenceNote }) => ({
-    url: url.trim(),
-    note: typeof evidenceNote === "string" ? evidenceNote.trim() : "",
-    submittedBy: user.id,
-    submittedAt: now,
-  })));
-  job.completionStatus = "artisan_marked_complete";
-  job.artisanCompletedAt = now;
-  job.artisanCompletionNote = note.trim();
-  job.progress.stage = "completion_submitted";
-  job.progress.updatedAt = now;
-  appendEvent(job, "completion_submitted", user.id, note.trim() || "Artisan submitted completion evidence.", { evidenceCount: evidence.length });
-  await job.save();
-  return job;
+    const now = new Date();
+    const evidence = files.map((file) => ({
+      filename: file.filename,
+      mimeType: file.mimetype,
+      sizeBytes: file.size,
+      sha256: file.sha256,
+      note: typeof file.note === "string" ? file.note.trim() : "",
+      submittedBy: user.id,
+      submittedAt: now,
+    }));
+    const event = {
+      type: "completion_submitted",
+      actorID: user.id,
+      message: note.trim() || "Artisan submitted completion evidence.",
+      metadata: { evidenceCount: files.length },
+      createdAt: now,
+    };
+    const job = await Job.findOneAndUpdate(
+      { _id: jobId, artisanID: user.id, status: "in_progress", completionStatus: "pending" },
+      {
+        $set: {
+          completionStatus: "artisan_marked_complete",
+          artisanCompletedAt: now,
+          artisanCompletionNote: note.trim(),
+          "progress.stage": "completion_submitted",
+          "progress.updatedAt": now,
+        },
+        $push: {
+          completionEvidence: { $each: evidence },
+          passportEvents: event,
+        },
+      },
+      { new: true, runValidators: true }
+    );
+    if (!job) throw httpError("The job is no longer ready for completion submission", 409);
+    return passportResponse(job);
+  } catch (error) {
+    await Promise.all((Array.isArray(files) ? files : []).map((file) => fs.rm(file.path, { force: true }).catch(() => {})));
+    throw error;
+  }
+};
+
+export const getCompletionEvidenceFile = async (jobId, evidenceId, user) => {
+  const job = await getPassportOrThrow(jobId);
+  assertParticipant(job, user);
+  if (!mongoose.isValidObjectId(evidenceId)) throw httpError("Invalid evidence ID", 400);
+  const evidence = job.completionEvidence.id(evidenceId);
+  if (!evidence) throw httpError("Completion evidence not found", 404);
+  if (!evidence.filename) throw httpError("This evidence is an external legacy link", 404);
+
+  const root = await fs.realpath(path.resolve(completionEvidenceDir(job._id)));
+  const candidate = path.resolve(root, path.basename(evidence.filename));
+  const file = await fs.realpath(candidate).catch(() => null);
+  if (!file || !file.startsWith(`${root}${path.sep}`)) throw httpError("Completion evidence file not found", 404);
+  return { file, mimeType: evidence.mimeType };
 };

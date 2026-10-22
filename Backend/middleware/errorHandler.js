@@ -14,7 +14,7 @@ export const errorHandler = (error, req, res, next) => {
     message = Object.values(error.errors || {}).map((e) => e.message).join('; ') || message;
   } else if (error.name === 'MulterError') {
     statusCode = 400;
-    message = error.code === 'LIMIT_FILE_SIZE' ? 'Image is too large (max 2 MB).' : error.message;
+    message = error.code === 'LIMIT_FILE_SIZE' ? 'An uploaded file exceeds the configured size limit.' : error.message;
   } else if (error.name === 'CastError') {
     statusCode = 400;
     message = `Invalid ${error.path || 'value'}.`;
