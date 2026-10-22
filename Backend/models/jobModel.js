@@ -23,7 +23,12 @@ const changeRequestSchema = new Schema({
 }, { _id: true });
 
 const completionEvidenceSchema = new Schema({
-  url: { type: String, required: true, trim: true, maxlength: 2048 },
+  // url is retained for older records; new evidence is stored privately by filename.
+  url: { type: String, default: null, trim: true, maxlength: 2048 },
+  filename: { type: String, default: null, maxlength: 100 },
+  mimeType: { type: String, enum: ["image/jpeg", "image/png", "image/webp", null], default: null },
+  sizeBytes: { type: Number, min: 0, default: null },
+  sha256: { type: String, default: null, maxlength: 64 },
   note: { type: String, default: "", trim: true, maxlength: 1000 },
   submittedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
   submittedAt: { type: Date, default: Date.now },
