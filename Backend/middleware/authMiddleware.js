@@ -28,7 +28,7 @@ export const authenticateUser = async (req, res, next) => {
     }
 
     // Verify token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+     const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ["HS256"] });
 
     const user = await User.findById(decoded.id).select("role isActive passwordChangedAt");
     if (!user || !user.isActive) {

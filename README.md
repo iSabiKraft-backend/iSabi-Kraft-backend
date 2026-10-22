@@ -54,10 +54,9 @@ Sign in ("Welcome Back")
                                Use user.profileCompleted to decide between "Complete Your Profile" and Home.
 - POST /auth/social            { provider: "google"|"apple", idToken, role?, fullName? } -> { user, token, isNewUser }
 
-Forgot password -> Check your Email/SMS -> Create New Password -> Password Reset
+Forgot password -> Check your Email/SMS -> Enter 6-digit code -> Create New Password -> Password Reset
 - POST /auth/forgot-password   { identifier } -> { channel: "email"|"sms", destination, resendAvailableInSeconds }  (same answer whether or not the account exists)
-- GET  /auth/reset-password/validate?token=...   (optional: check the link when the screen opens)
-- POST /auth/reset-password    { token, password, confirmPassword } -> signs out all existing sessions
+- POST /auth/reset-password    { identifier, code, password, confirmPassword } -> signs out all existing sessions
 
 Password rules: at least 8 characters, one uppercase letter, one number, one special character.
 
