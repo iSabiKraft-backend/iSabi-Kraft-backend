@@ -9,6 +9,7 @@ import { resolveLocation } from "../utils/nigeriaLocations.js";
 import { splitFullName } from "../utils/identifier.js";
 import { notifyUser } from "./notificationService.js";
 import { identityDir, MAX_DOCS, MAX_DOC_BYTES } from "../middleware/identityUploadMiddleware.js";
+import { uploadBufferToCloudinary, deleteCloudinaryAsset } from "../utils/cloudinary.js";
 
 // Only these fields may be written from a request body. Without this, an
 // artisan could send {"verificationStatus":"approved","avgRating":5,"userId":...}.
@@ -171,6 +172,38 @@ export async function completeArtisanProfile(userId, { fullName, tradeCategory, 
 // The owner's own view: includes the private residential address and document metadata.
 export async function getMyProfile(userId) {
   const profile = await ArtisanProfile.findOne({ userId }).select("+residentialAddress +verificationDocuments");
+// Upload a portfolio image to Cloudinary and persist its URL/public ID.
+export async function addPortfolioPhoto(userId, file, caption = null) {
+  if (!file?.buffer) throw httpError('Attach an image in the "image" field.', 400);
+  const profile = await ArtisanProfile.findOne({ userId });
+  if (!profile) throw httpError("Create your artisan profile first.", 404);
+
+  const uploaded = await uploadBufferToCloudinary(file.buffer, {
+    folder: `isabikraft/artisans/${profile._id}/portfolio`,
+    resourceType: "image",
+  });
+
+  try {
+    return await PortfolioItem.create({
+      artisanProfileId: profile._id,
+      url: uploaded.secure_url,
+      publicId: uploaded.public_id,
+      type: "photo",
+      caption: caption || null,
+    });
+  } catch (error) {
+    // Avoid orphaning the asset if the database write fails.
+    await deleteCloudinaryAsset(uploaded.public_id, "image").catch((cleanupError) => {
+      console.error("Failed to clean up unreferenced portfolio upload:", cleanupError.message);
+    });
+    throw error;
+  }
+}
+
+// Submit NIN/BVN for manual review. Raw ID number is hashed before it ever
+// touches the database — see utils/hashIdNumber.js.
+export async function submitVerification(userId, { idType, idNumber }) {
+  const profile = await ArtisanProfile.findOne({ userId });
   if (!profile) throw httpError("Create your artisan profile first.", 404);
   return profile.toJSON();
 }

@@ -5,6 +5,7 @@ import {
   getById,
   upsertMyProfile,
   addPortfolioItem,
+  uploadPortfolioPhoto,
   submitVerification,
   listPendingVerifications,
   reviewVerification,
@@ -19,6 +20,7 @@ import { authenticateUser } from "../middleware/authMiddleware.js";
 import { authorizeRoles } from "../middleware/roleMiddleware.js";
 import { validateRequest } from "../middleware/validationMiddleware.js";
 import { uploadDocuments as documentUpload } from "../middleware/identityUploadMiddleware.js";
+import { uploadCloudinaryImage } from "../middleware/cloudinaryUploadMiddleware.js";
 import {
   upsertProfileValidator,
   addPortfolioItemValidator,
@@ -83,6 +85,14 @@ route.post(
   rateLimit({ windowMs: 15 * 60 * 1000, limit: Number(process.env.ID_UPLOAD_RATE_LIMIT || 20), message: { success: false, message: "Too many uploads. Please wait." } }),
   ...documentUpload,
   uploadDocuments
+);
+
+route.post(
+  "/me/portfolio/upload",
+  authenticateUser,
+  authorizeRoles("artisan"),
+  ...uploadCloudinaryImage("image"),
+  uploadPortfolioPhoto
 );
 
 route.post(
