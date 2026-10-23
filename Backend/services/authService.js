@@ -8,8 +8,8 @@ import {
   issueVerificationCode,
   consumeVerificationCode,
   getVerificationCooldown,
-  issueResetLink,
-  findResetToken,
+  issueResetCode,
+  findResetCode,
   deleteUserCodes,
   RESEND_COOLDOWN_SECONDS,
 } from "./otpService.js";
