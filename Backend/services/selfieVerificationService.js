@@ -94,9 +94,28 @@ export async function requireActiveSession(req, _res, next) {
   }
 }
 
+const resolveSafeSelfiePath = (unsafePath) => {
+  if (typeof unsafePath !== "string" || !unsafePath.trim()) {
+    throw httpError("Invalid upload path.", 400);
+  }
+
+  const root = path.resolve(selfieDir);
+  const candidate = path.resolve(root, unsafePath);
+  const relative = path.relative(root, candidate);
+
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw httpError("Invalid upload path.", 400);
+  }
+
+  return candidate;
+};
+
 // One camera frame for the NEXT challenge. Must be uploaded in order, at human speed.
 export async function addFrame(session, file, challengeId) {
-  const discard = () => fs.rm(file.path, { force: true });
+  const discard = async () => {
+    const safePath = resolveSafeSelfiePath(file?.path);
+    await fs.rm(safePath, { force: true });
+  };
   try {
     const index = session.frames.length;
     const expected = session.challenges[index];
