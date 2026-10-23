@@ -61,6 +61,15 @@ export const updateProgress = async (jobId, user, { stage, note, files = [] }) =
   if (job.status !== "in_progress") throw httpError("Progress can only be updated while the job is in progress", 409);
   if (!PROGRESS_STAGES.includes(stage)) throw httpError("Invalid progress stage", 400);
 
+  if (!Array.isArray(files)) throw httpError("Invalid files payload", 400);
+  if (
+    files.some(
+      (file) => !file || typeof file !== "object" || typeof file.mimetype !== "string"
+    )
+  ) {
+    throw httpError("Invalid files payload", 400);
+  }
+
   if (job.progress.photos.length + files.length > 5) throw httpError("Job progress can have no more than 5 photos", 400);
   if (files.some((file) => !file.mimetype.startsWith("image/"))) throw httpError("Job progress accepts photos only", 400);
   if (files.length) {
