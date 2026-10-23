@@ -2,6 +2,8 @@ import { validateEnv } from './config/env.js';
 import app from './app.js';
 import connectDB from './config/db.js';
 import { purgeExpired } from './services/selfieVerificationService.js';
+import { purgeIdentityDocuments } from './services/artisanService.js';
+
 
 validateEnv();
 

@@ -63,3 +63,17 @@ export async function sendSms({ to, text }) {
 
 export const send = (channel, to, { subject, text }) =>
   channel === "email" ? sendEmail({ to, subject, text }) : sendSms({ to, text });
+
+// Tell a user something (e.g. "your verification was approved"), by email if they have a verified
+// one, otherwise SMS to a verified phone. Best-effort: a failed notification is logged and never
+// breaks the action that triggered it.
+export async function notifyUser(user, { subject, text }) {
+  try {
+    if (user.email && user.emailVerified) return await sendEmail({ to: user.email, subject, text });
+    if (user.phone && user.phoneVerified) return await sendSms({ to: user.phone, text });
+    if (user.email) return await sendEmail({ to: user.email, subject, text });
+    if (user.phone) return await sendSms({ to: user.phone, text });
+  } catch (error) {
+    console.error("Notification failed:", error.message);
+  }
+}
