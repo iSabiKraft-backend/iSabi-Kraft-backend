@@ -42,9 +42,8 @@ route.post("/resend-verification", resendVerificationValidator, validateRequest,
 route.post("/login", loginValidator, validateRequest, login);
 route.post("/social", socialLoginValidator, validateRequest, social);
 
-// --- Forgot password -> Check your email/SMS -> Create new password -> Password reset ---
+// --- Forgot password -> Check your email/SMS -> Enter code -> Create new password -> Password reset ---
 route.post("/forgot-password", forgotPasswordValidator, validateRequest, forgotPassword);
-route.get("/reset-password/validate", resetTokenQueryValidator, validateRequest, validateResetToken);
 route.post("/reset-password", resetPasswordValidator, validateRequest, resetPassword);
 
 export default route;

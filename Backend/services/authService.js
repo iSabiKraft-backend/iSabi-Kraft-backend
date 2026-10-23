@@ -8,8 +8,8 @@ import {
   issueVerificationCode,
   consumeVerificationCode,
   getVerificationCooldown,
-  issueResetLink,
-  findResetToken,
+  issueResetCode,
+  findResetCode,
   deleteUserCodes,
   RESEND_COOLDOWN_SECONDS,
 } from "./otpService.js";
@@ -159,7 +159,7 @@ export async function loginUser({ identifier, email, password, role, rememberMe 
   return { user: user.toJSON(), token: generateToken(user, { rememberMe: Boolean(rememberMe) }) };
 }
 
-// "Forgot Password?" — email or phone in, reset LINK out (by email or SMS).
+// "Forgot Password?" — email or phone in, reset CODE out (by email or SMS).
 // Always answers the same way whether or not the account exists.
 export async function forgotPassword({ identifier }) {
   const parsed = parseIdentifier(identifier);
@@ -170,24 +170,22 @@ export async function forgotPassword({ identifier }) {
 
   const user = await User.findOne(identifierQuery(parsed));
   if (user && user.isActive) {
-    const issued = await issueResetLink(user, channel, parsed.value);
+    const issued = await issueResetCode(user, channel, parsed.value);
     result.resendAvailableInSeconds = issued.resendAvailableInSeconds;
-    if (exposeDev() && issued.link) result.devResetLink = issued.link;
+    if (exposeDev() && issued.code) result.devCode = issued.code;
   }
   return result;
 }
 
-// Called when the reset screen opens, so an expired link is caught before they type a password
-export async function validateResetToken(token) {
-  await findResetToken(token);
-  return { valid: true };
-}
-
 // "Create New Password"
-export async function resetPassword({ token, password }) {
-  const record = await findResetToken(token);
-  const user = await User.findById(record.userId).select("+password");
-  if (!user || !user.isActive) throw httpError("This reset link is invalid or has expired.", 400);
+export async function resetPassword({ identifier, code, password }) {
+  const parsed = parseIdentifier(identifier);
+  if (!parsed) throw httpError("Enter a valid email address or phone number.", 400);
+
+  const user = await User.findOne(identifierQuery(parsed)).select("+password");
+  if (!user || !user.isActive) throw httpError("This reset code is invalid or has expired.", 400);
+
+  const record = await findResetCode(user._id, code);
 
   if (user.password && (await comparePassword(password, user.password))) {
     throw httpError("Your new password must be different from your previous password.", 400);
@@ -195,11 +193,10 @@ export async function resetPassword({ token, password }) {
 
   user.password = await hashPassword(password);
   user.passwordChangedAt = new Date(); // signs out every existing session
-  // Receiving the link on that email/phone proves they own it
   if (record.channel === "email") user.emailVerified = true;
   else user.phoneVerified = true;
-  await user.save();
 
+  await user.save();
   await deleteUserCodes(user._id);
   return { passwordReset: true };
 }

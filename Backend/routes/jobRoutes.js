@@ -10,6 +10,7 @@ import {
   proposeJobChange,
   decideJobChange,
   submitJobCompletion,
+  getJobCompletionEvidence,
 } from "../controllers/jobController.js";
 
 import asyncHandler from "../utils/asyncHandler.js";
@@ -19,6 +20,10 @@ import { authenticateUser } from "../middleware/authMiddleware.js";
 import { authorizeRoles } from "../middleware/roleMiddleware.js";
 import { requireTermsAccepted } from "../middleware/termsMiddleware.js";
 import { uploadMedia, uploadPhotos } from "../middleware/cloudinaryUploadMiddleware.js";
+import {
+  requireCompletionEvidenceAccess,
+  uploadCompletionEvidence,
+} from "../middleware/completionEvidenceUploadMiddleware.js";
 import {
   jobValidator,
   updateJobValidator,
@@ -149,10 +154,18 @@ router.post(
   authorizeRoles("artisan"),
   requireTermsAccepted,
   jobIdValidator,
-  completionValidator,
   validateRequest,
   uploadMedia,
   asyncHandler(submitJobCompletion)
+);
+
+router.get(
+  "/:id/completion/evidence/:evidenceId",
+  authenticateUser,
+  jobIdValidator,
+  param("evidenceId").isMongoId().withMessage("Invalid evidence ID"),
+  validateRequest,
+  asyncHandler(getJobCompletionEvidence)
 );
 
 // Update a job

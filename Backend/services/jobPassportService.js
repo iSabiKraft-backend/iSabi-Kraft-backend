@@ -1,4 +1,6 @@
 import mongoose from "mongoose";
+import fs from "node:fs/promises";
+import path from "node:path";
 import Job from "../models/jobModel.js";
 import { httpError } from "../utils/httpError.js";
 import { uploadFilesToCloudinary } from "../utils/cloudinary.js";
@@ -31,10 +33,25 @@ const appendEvent = (job, type, actorID, message, metadata = {}) => {
   job.passportEvents.push({ type, actorID, message, metadata, createdAt: new Date() });
 };
 
+const passportResponse = (job) => {
+  const result = job.toObject();
+  result.completionEvidence = result.completionEvidence.map((item) => ({
+    _id: item._id,
+    url: item.url ?? null,
+    note: item.note,
+    submittedBy: item.submittedBy,
+    submittedAt: item.submittedAt,
+    ...(item.filename && {
+      downloadUrl: `/api/jobs/${job._id}/completion/evidence/${item._id}`,
+    }),
+  }));
+  return result;
+};
+
 export const getJobPassport = async (jobId, user) => {
   const job = await getPassportOrThrow(jobId);
   assertParticipant(job, user);
-  return job;
+  return passportResponse(job);
 };
 
 export const updateProgress = async (jobId, user, { stage, note, files = [] }) => {

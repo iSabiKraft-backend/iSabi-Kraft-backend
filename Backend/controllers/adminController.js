@@ -57,6 +57,10 @@ const getDashboard = async (req, res, next) => {
   }
 };
 
+const ADMIN_USER_FIELDS =
++  "firstName lastName email phone role isActive emailVerified phoneVerified " +
++  "verificationMethod state lga avatarUrl profileCompleted selfieStatus " +
++  "termsAcceptedVersion termsAcceptedAt lastLoginAt createdAt updatedAt";
 //This gets the users for the admin controller
 const getUsers = async (req, res, next) => {
   try {
@@ -64,7 +68,7 @@ const getUsers = async (req, res, next) => {
 
     const [users, total] = await Promise.all([
       User.find()
-        .select("-password -passwordHash -resetPasswordToken")
+        .select(ADMIN_USER_FIELDS)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -91,7 +95,7 @@ const getUsers = async (req, res, next) => {
 const getUserById = async (req, res, next) => {
   try {
     const user = await User.findById(req.params.userId)
-      .select("-password -passwordHash -resetPasswordToken")
+      .select(ADMIN_USER_FIELDS)
       .lean();
 
     if (!user) {

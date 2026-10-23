@@ -100,7 +100,7 @@ export async function listUsers({ role, page = 1, pageSize = 20 }) {
   const limit = Math.min(Number(pageSize) || 20, 100);
   const currentPage = Math.max(Number(page) || 1, 1);
 
-  const filter = role ? { role: String(role) } : {};
+  const filter = ["customer", "artisan", "admin"].includes(role) ? { role } : {};
 
   const [items, total] = await Promise.all([
     User.find(filter)
