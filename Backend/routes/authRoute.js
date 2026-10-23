@@ -6,7 +6,6 @@ import {
   resendVerification,
   login,
   forgotPassword,
-  validateResetToken,
   resetPassword,
   social,
 } from "../controllers/authController.js";
@@ -16,7 +15,6 @@ import {
   resendVerificationValidator,
   loginValidator,
   forgotPasswordValidator,
-  resetTokenQueryValidator,
   resetPasswordValidator,
   socialLoginValidator,
 } from "../validators/authValidator.js";
