@@ -169,14 +169,29 @@ export async function completeArtisanProfile(userId, { fullName, tradeCategory, 
   return await getMyProfile(userId);
 }
 
-// The owner's own view: includes the private residential address and document metadata.
+
+ // The owner's own view: includes the private residential address and document metadata.
 export async function getMyProfile(userId) {
-  const profile = await ArtisanProfile.findOne({ userId }).select("+residentialAddress +verificationDocuments");
+  const profile = await ArtisanProfile.findOne({ userId })
+    .select("+residentialAddress +verificationDocuments");
+
+  if (!profile) {
+    throw httpError("Artisan profile not found.", 404);
+  }
+
+  return await withRelations(profile);
+}
+
 // Upload a portfolio image to Cloudinary and persist its URL/public ID.
 export async function addPortfolioPhoto(userId, file, caption = null) {
-  if (!file?.buffer) throw httpError('Attach an image in the "image" field.', 400);
+  if (!file?.buffer) {
+    throw httpError('Attach an image in the "image" field.', 400);
+  }
+
   const profile = await ArtisanProfile.findOne({ userId });
-  if (!profile) throw httpError("Create your artisan profile first.", 404);
+  if (!profile) {
+    throw httpError("Create your artisan profile first.", 404);
+  }
 
   const uploaded = await uploadBufferToCloudinary(file.buffer, {
     folder: `isabikraft/artisans/${profile._id}/portfolio`,
@@ -192,21 +207,19 @@ export async function addPortfolioPhoto(userId, file, caption = null) {
       caption: caption || null,
     });
   } catch (error) {
-    // Avoid orphaning the asset if the database write fails.
-    await deleteCloudinaryAsset(uploaded.public_id, "image").catch((cleanupError) => {
-      console.error("Failed to clean up unreferenced portfolio upload:", cleanupError.message);
-    });
+    await deleteCloudinaryAsset(uploaded.public_id, "image").catch(
+      (cleanupError) => {
+        console.error(
+          "Failed to clean up unreferenced portfolio upload:",
+          cleanupError.message
+        );
+      }
+    );
     throw error;
   }
 }
 
-// Submit NIN/BVN for manual review. Raw ID number is hashed before it ever
-// touches the database — see utils/hashIdNumber.js.
-export async function submitVerification(userId, { idType, idNumber }) {
-  const profile = await ArtisanProfile.findOne({ userId });
-  if (!profile) throw httpError("Create your artisan profile first.", 404);
-  return profile.toJSON();
-}
+
 
 // Identity step: upload the NIN/BVN slip (front & back). Replaces any previously uploaded set.
 // `files` come from the upload middleware (already type/size/signature checked, in staging).
@@ -433,4 +446,4 @@ export async function reviewVerification(artisanId, adminId, { decision, tier, r
   }
 
   return await ArtisanProfile.findById(profile._id);
-}
+};
