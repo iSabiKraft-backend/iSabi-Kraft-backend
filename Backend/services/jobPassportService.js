@@ -139,6 +139,9 @@ export const submitCompletion = async (jobId, user, { note = "", evidence = [], 
   const job = await getPassportOrThrow(jobId);
   const { isArtisan } = assertParticipant(job, user);
   if (!isArtisan) throw httpError("Only the assigned artisan can submit completion evidence", 403);
+  if (typeof note !== "string") throw httpError("Completion note must be a string", 400);
+  if (!Array.isArray(evidence)) throw httpError("Completion evidence must be an array", 400);
+  if (!Array.isArray(files)) throw httpError("Completion files must be an array", 400);
   if (job.status !== "in_progress" || job.completionStatus !== "pending") throw httpError("The job is not ready for completion submission", 409);
   if (evidence.length === 0 && files.length === 0) {
     throw httpError("Submit at least one completion photo or video", 400);
