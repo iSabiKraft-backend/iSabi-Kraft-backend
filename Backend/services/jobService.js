@@ -143,24 +143,30 @@ export const cancelJob = async (jobID, customerID) => {
 
 
 export const addJobPhotos = async (jobID, customerID, files = []) => {
+  const normalizedFiles = files === undefined ? [] : files;
+  if (!Array.isArray(normalizedFiles)) throw createError("Invalid files payload", 400);
+
   const job = await Job.findById(jobID);
   if (!job) throw createError("Job not found", 404);
   if (String(job.customerID) !== String(customerID)) throw createError("You are not authorized to modify this job", 403);
   if (job.status !== "open") throw createError("Only open jobs can receive job request photos", 400);
-  if (job.photos.length + files.length > 5) throw createError("A job cannot have more than 5 photos", 400);
-  const media = await uploadFilesToCloudinary(files, { folder: `isabikraft/jobs/${job._id}/request` });
+  if (job.photos.length + normalizedFiles.length > 5) throw createError("A job cannot have more than 5 photos", 400);
+  const media = await uploadFilesToCloudinary(normalizedFiles, { folder: `isabikraft/jobs/${job._id}/request` });
   job.photos.push(...media.filter((item) => item.resourceType === "image"));
   await job.save();
   return job;
 };
 
 export const addPassportPhotos = async (jobID, user, files = []) => {
+  const normalizedFiles = files === undefined ? [] : files;
+  if (!Array.isArray(normalizedFiles)) throw createError("Invalid files payload", 400);
+
   const job = await Job.findById(jobID);
   if (!job) throw createError("Job not found", 404);
   const participant = String(job.customerID) === String(user.id) || String(job.artisanID) === String(user.id);
   if (!participant && user.role !== "admin") throw createError("You are not authorized to modify this job passport", 403);
-  if (job.passportPhotos.length + files.length > 5) throw createError("A job passport can have no more than 5 photos", 400);
-  const media = await uploadFilesToCloudinary(files, { folder: `isabikraft/jobs/${job._id}/passport` });
+  if (job.passportPhotos.length + normalizedFiles.length > 5) throw createError("A job passport can have no more than 5 photos", 400);
+  const media = await uploadFilesToCloudinary(normalizedFiles, { folder: `isabikraft/jobs/${job._id}/passport` });
   job.passportPhotos.push(...media.filter((item) => item.resourceType === "image"));
   await job.save();
   return job;
