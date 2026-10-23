@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import Job from "../models/jobModel.js";
 import { httpError } from "../utils/httpError.js";
-import { completionEvidenceDir } from "../middleware/completionEvidenceUploadMiddleware.js";
+import { uploadFilesToCloudinary } from "../utils/cloudinary.js";
 
 const PROGRESS_STAGES = ["materials", "work_started", "quality_check"];
 
@@ -54,13 +54,28 @@ export const getJobPassport = async (jobId, user) => {
   return passportResponse(job);
 };
 
-export const updateProgress = async (jobId, user, { stage, note }) => {
+export const updateProgress = async (jobId, user, { stage, note, files = [] }) => {
   const job = await getPassportOrThrow(jobId);
   const { isArtisan } = assertParticipant(job, user);
   if (!isArtisan) throw httpError("Only the assigned artisan can update job progress", 403);
   if (job.status !== "in_progress") throw httpError("Progress can only be updated while the job is in progress", 409);
   if (!PROGRESS_STAGES.includes(stage)) throw httpError("Invalid progress stage", 400);
 
+  if (!Array.isArray(files)) throw httpError("Invalid files payload", 400);
+  if (
+    files.some(
+      (file) => !file || typeof file !== "object" || typeof file.mimetype !== "string"
+    )
+  ) {
+    throw httpError("Invalid files payload", 400);
+  }
+
+  if (job.progress.photos.length + files.length > 5) throw httpError("Job progress can have no more than 5 photos", 400);
+  if (files.some((file) => !file.mimetype.startsWith("image/"))) throw httpError("Job progress accepts photos only", 400);
+  if (files.length) {
+    const media = await uploadFilesToCloudinary(files, { folder: `isabikraft/jobs/${job._id}/progress` });
+    job.progress.photos.push(...media.filter((item) => item.resourceType === "image"));
+  }
   job.progress.stage = stage;
   job.progress.updatedAt = new Date();
   appendEvent(job, "progress_updated", user.id, note?.trim() || `Progress updated to ${stage}.`, { stage });
@@ -120,64 +135,47 @@ export const decideChange = async (jobId, changeId, user, decision) => {
   return change;
 };
 
-export const submitCompletion = async (jobId, user, { note = "", files = [] }) => {
-  try {
-    if (!mongoose.isValidObjectId(jobId)) throw httpError("Invalid job ID", 400);
-    if (!Array.isArray(files) || files.length === 0 || files.length > 5) throw httpError("Upload between one and five completion evidence images", 400);
+export const submitCompletion = async (jobId, user, { note = "", evidence = [], files = [] }) => {
+  const job = await getPassportOrThrow(jobId);
+  const { isArtisan } = assertParticipant(job, user);
+  if (!isArtisan) throw httpError("Only the assigned artisan can submit completion evidence", 403);
+  if (typeof note !== "string") throw httpError("Completion note must be a string", 400);
+  if (!Array.isArray(evidence)) throw httpError("Completion evidence must be an array", 400);
+  if (!Array.isArray(files)) throw httpError("Completion files must be an array", 400);
+  if (job.status !== "in_progress" || job.completionStatus !== "pending") throw httpError("The job is not ready for completion submission", 409);
+  if (evidence.length === 0 && files.length === 0) {
+    throw httpError("Submit at least one completion photo or video", 400);
+  }
+  if (evidence.some((item) => typeof item?.url !== "string" || !item.url.trim())) {
+    throw httpError("Completion evidence URLs must be valid", 400);
+  }
+  if (files.length > 8) throw httpError("A completion submission can contain no more than 8 media files", 400);
+  const uploaded = files.length
+    ? await uploadFilesToCloudinary(files, { folder: `isabikraft/jobs/${job._id}/completion` })
+    : [];
 
-    const now = new Date();
-    const evidence = files.map((file) => ({
-      filename: file.filename,
-      mimeType: file.mimetype,
-      sizeBytes: file.size,
-      sha256: file.sha256,
-      note: typeof file.note === "string" ? file.note.trim() : "",
+  const now = new Date();
+  job.completionEvidence.push(
+    ...evidence.map(({ url, note: evidenceNote }) => ({
+      url: url.trim(),
+      note: typeof evidenceNote === "string" ? evidenceNote.trim() : "",
       submittedBy: user.id,
       submittedAt: now,
-    }));
-    const event = {
-      type: "completion_submitted",
-      actorID: user.id,
-      message: note.trim() || "Artisan submitted completion evidence.",
-      metadata: { evidenceCount: files.length },
-      createdAt: now,
-    };
-    const job = await Job.findOneAndUpdate(
-      { _id: jobId, artisanID: user.id, status: "in_progress", completionStatus: "pending" },
-      {
-        $set: {
-          completionStatus: "artisan_marked_complete",
-          artisanCompletedAt: now,
-          artisanCompletionNote: note.trim(),
-          "progress.stage": "completion_submitted",
-          "progress.updatedAt": now,
-        },
-        $push: {
-          completionEvidence: { $each: evidence },
-          passportEvents: event,
-        },
-      },
-      { new: true, runValidators: true }
-    );
-    if (!job) throw httpError("The job is no longer ready for completion submission", 409);
-    return passportResponse(job);
-  } catch (error) {
-    await Promise.all((Array.isArray(files) ? files : []).map((file) => fs.rm(file.path, { force: true }).catch(() => {})));
-    throw error;
-  }
-};
-
-export const getCompletionEvidenceFile = async (jobId, evidenceId, user) => {
-  const job = await getPassportOrThrow(jobId);
-  assertParticipant(job, user);
-  if (!mongoose.isValidObjectId(evidenceId)) throw httpError("Invalid evidence ID", 400);
-  const evidence = job.completionEvidence.id(evidenceId);
-  if (!evidence) throw httpError("Completion evidence not found", 404);
-  if (!evidence.filename) throw httpError("This evidence is an external legacy link", 404);
-
-  const root = await fs.realpath(path.resolve(completionEvidenceDir(job._id)));
-  const candidate = path.resolve(root, path.basename(evidence.filename));
-  const file = await fs.realpath(candidate).catch(() => null);
-  if (!file || !file.startsWith(`${root}${path.sep}`)) throw httpError("Completion evidence file not found", 404);
-  return { file, mimeType: evidence.mimeType };
+    })),
+    ...uploaded.map(({ url, publicId, resourceType }) => ({
+      url,
+      publicId,
+      resourceType,
+      submittedBy: user.id,
+      submittedAt: now,
+    }))
+  );
+  job.completionStatus = "artisan_marked_complete";
+  job.artisanCompletedAt = now;
+  job.artisanCompletionNote = note.trim();
+  job.progress.stage = "completion_submitted";
+  job.progress.updatedAt = now;
+  appendEvent(job, "completion_submitted", user.id, note.trim() || "Artisan submitted completion evidence.", { evidenceCount: evidence.length });
+  await job.save();
+  return job;
 };

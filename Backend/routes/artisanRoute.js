@@ -4,6 +4,7 @@ import {
   getById,
   upsertMyProfile,
   addPortfolioItem,
+  uploadPortfolioPhoto,
   submitVerification,
   listPendingVerifications,
   reviewVerification,
@@ -11,6 +12,7 @@ import {
 import { authenticateUser } from "../middleware/authMiddleware.js";
 import { authorizeRoles } from "../middleware/roleMiddleware.js";
 import { validateRequest } from "../middleware/validationMiddleware.js";
+import { uploadCloudinaryImage } from "../middleware/cloudinaryUploadMiddleware.js";
 import {
   upsertProfileValidator,
   addPortfolioItemValidator,
@@ -46,6 +48,14 @@ route.post(
   addPortfolioItemValidator,
   validateRequest,
   addPortfolioItem
+);
+
+route.post(
+  "/me/portfolio/upload",
+  authenticateUser,
+  authorizeRoles("artisan"),
+  ...uploadCloudinaryImage("image"),
+  uploadPortfolioPhoto
 );
 
 route.post(

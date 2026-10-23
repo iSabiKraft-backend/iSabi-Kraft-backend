@@ -3,6 +3,7 @@ import PortfolioItem from "../models/portfolioItemModel.js";
 import User from "../models/userModel.js";
 import { hashIdNumber, lastFourDigits } from "../utils/hashIdNumber.js";
 import { httpError } from "../utils/httpError.js";
+import { uploadBufferToCloudinary, deleteCloudinaryAsset } from "../utils/cloudinary.js";
 
 // Only these fields may be written from a request body. Without this, an
 // artisan could send {"verificationStatus":"approved","avgRating":5,"userId":...}.
@@ -96,6 +97,34 @@ export async function addPortfolioItem(userId, itemData) {
   if (!profile) throw httpError("Create your artisan profile first.", 404);
 
   return await PortfolioItem.create({ ...pick(itemData, PORTFOLIO_FIELDS), artisanProfileId: profile._id });
+}
+
+// Upload a portfolio image to Cloudinary and persist its URL/public ID.
+export async function addPortfolioPhoto(userId, file, caption = null) {
+  if (!file?.buffer) throw httpError('Attach an image in the "image" field.', 400);
+  const profile = await ArtisanProfile.findOne({ userId });
+  if (!profile) throw httpError("Create your artisan profile first.", 404);
+
+  const uploaded = await uploadBufferToCloudinary(file.buffer, {
+    folder: `isabikraft/artisans/${profile._id}/portfolio`,
+    resourceType: "image",
+  });
+
+  try {
+    return await PortfolioItem.create({
+      artisanProfileId: profile._id,
+      url: uploaded.secure_url,
+      publicId: uploaded.public_id,
+      type: "photo",
+      caption: caption || null,
+    });
+  } catch (error) {
+    // Avoid orphaning the asset if the database write fails.
+    await deleteCloudinaryAsset(uploaded.public_id, "image").catch((cleanupError) => {
+      console.error("Failed to clean up unreferenced portfolio upload:", cleanupError.message);
+    });
+    throw error;
+  }
 }
 
 // Submit NIN/BVN for manual review. Raw ID number is hashed before it ever
