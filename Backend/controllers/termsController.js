@@ -11,7 +11,15 @@ export const getActiveTerms = async (req, res, next) => {
 
 export const acceptTerms = async (req, res, next) => {
   try {
-    const result = await termsService.acceptTerms(req.user.id, req.body.version);
+    const { version } = req.body;
+
+    if (typeof version !== "string") {
+      const error = new Error("Invalid terms version.");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const result = await termsService.acceptTerms(req.user.id, version);
 
     return res.status(200).json({
       success: true,
