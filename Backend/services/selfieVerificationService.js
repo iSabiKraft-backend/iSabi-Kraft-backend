@@ -5,6 +5,7 @@ import SelfieVerification from "../models/selfieVerificationModel.js";
 import User from "../models/userModel.js";
 import { httpError } from "../utils/httpError.js";
 import { selfieDir } from "../middleware/selfieUploadMiddleware.js";
+import { notifyUser } from "./notificationService.js";
 
 // Everything is read at call time so it can be tuned from .env without code changes.
 const cfg = () => ({
@@ -95,21 +96,7 @@ export async function requireActiveSession(req, _res, next) {
 
 // One camera frame for the NEXT challenge. Must be uploaded in order, at human speed.
 export async function addFrame(session, file, challengeId) {
-  const discard = async () => {
-    if (!file?.filename || typeof file.filename !== "string") return;
-    if (path.basename(file.filename) !== file.filename) return;
-
-    try {
-      const root = await fs.realpath(path.resolve(selfieDir(session._id)));
-      const candidate = path.resolve(root, file.filename);
-      const target = await fs.realpath(candidate);
-      if (target === root || target.startsWith(root + path.sep)) {
-        await fs.rm(target, { force: true });
-      }
-    } catch {
-      // best-effort cleanup only
-    }
-  };
+  const discard = () => fs.rm(file.path, { force: true });
   try {
     const index = session.frames.length;
     const expected = session.challenges[index];
@@ -229,6 +216,18 @@ export async function reviewSession(sessionId, adminId, { decision, rejectionRea
   }
 
   await User.updateOne({ _id: session.userId }, { selfieStatus: decision === "approved" ? "approved" : "rejected", selfieReviewedAt: new Date() });
+
+  // Only a rejection needs to reach the user now (they must retake it); approval is announced
+  // together with the overall verification decision.
+  if (!approved) {
+    const owner = await User.findById(session.userId);
+    if (owner) {
+      await notifyUser(owner, {
+        subject: "Please retake your selfie",
+        text: `We couldn't verify your selfie${session.rejectionReason ? `: ${session.rejectionReason}` : "."} Open the app and try again.`,
+      });
+    }
+  }
 
   // A rejected selfie is deleted straight away; an approved one is kept only for the audit window
   if (!approved) {
