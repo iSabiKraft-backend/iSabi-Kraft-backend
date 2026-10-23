@@ -58,9 +58,9 @@ const getDashboard = async (req, res, next) => {
 };
 
 const ADMIN_USER_FIELDS =
-+  "firstName lastName email phone role isActive emailVerified phoneVerified " +
-+  "verificationMethod state lga avatarUrl profileCompleted selfieStatus " +
-+  "termsAcceptedVersion termsAcceptedAt lastLoginAt createdAt updatedAt";
+  "firstName lastName email phone role isActive emailVerified phoneVerified " +
+  "verificationMethod state lga avatarUrl profileCompleted selfieStatus " +
+  "termsAcceptedVersion termsAcceptedAt lastLoginAt createdAt updatedAt";
 //This gets the users for the admin controller
 const getUsers = async (req, res, next) => {
   try {
