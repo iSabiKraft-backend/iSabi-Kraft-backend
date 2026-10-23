@@ -1,8 +1,14 @@
-import ArtisanProfile, { CORE_CATEGORIES } from "../models/artisanProfileModel.js";
+import fs from "node:fs/promises";
+import path from "node:path";
+import ArtisanProfile, { CORE_CATEGORIES, EXPERIENCE_LEVELS } from "../models/artisanProfileModel.js";
 import PortfolioItem from "../models/portfolioItemModel.js";
 import User from "../models/userModel.js";
 import { hashIdNumber, lastFourDigits } from "../utils/hashIdNumber.js";
 import { httpError } from "../utils/httpError.js";
+import { resolveLocation } from "../utils/nigeriaLocations.js";
+import { splitFullName } from "../utils/identifier.js";
+import { notifyUser } from "./notificationService.js";
+import { identityDir, MAX_DOCS, MAX_DOC_BYTES } from "../middleware/identityUploadMiddleware.js";
 
 // Only these fields may be written from a request body. Without this, an
 // artisan could send {"verificationStatus":"approved","avgRating":5,"userId":...}.
@@ -98,32 +104,244 @@ export async function addPortfolioItem(userId, itemData) {
   return await PortfolioItem.create({ ...pick(itemData, PORTFOLIO_FIELDS), artisanProfileId: profile._id });
 }
 
-// Submit NIN/BVN for manual review. Raw ID number is hashed before it ever
-// touches the database — see utils/hashIdNumber.js.
-export async function submitVerification(userId, { idType, idNumber }) {
-  const profile = await ArtisanProfile.findOne({ userId });
+// ---------------------------------------------------------------------------------------------
+// Artisan onboarding (Figma: Complete Your Profile -> Identity Verification -> Under Review)
+// ---------------------------------------------------------------------------------------------
+
+const reviewHours = () => process.env.REVIEW_SLA_HOURS || "24-48"; // "usually takes 24-48 hours"
+const selfieRequired = () => process.env.REQUIRE_SELFIE_FOR_ARTISAN_APPROVAL !== "false";
+const cap = (v) => v.charAt(0).toUpperCase() + v.slice(1);
+
+// Fills the dropdowns / limits on the artisan screens.
+export function getOptions() {
+  return {
+    tradeCategories: CORE_CATEGORIES.map((value) => ({ value, label: cap(value) })),
+    experienceLevels: EXPERIENCE_LEVELS.map(({ value, label }) => ({ value, label })),
+    bioMaxLength: 500,
+    identityTypes: ["NIN", "BVN"],
+    documents: { allowedTypes: ["image/jpeg", "image/png", "application/pdf"], maxSizeBytes: MAX_DOC_BYTES, maxFiles: MAX_DOCS },
+    estimatedReviewHours: reviewHours(),
+  };
+}
+
+// "Complete Your Profile" (artisan): photo is uploaded separately (POST /users/me/avatar).
+export async function completeArtisanProfile(userId, { fullName, tradeCategory, experienceLevel, state, lga, bio, residentialAddress }) {
+  const user = await User.findById(userId);
+  if (!user) throw httpError("User not found.", 404);
+
+  const location = resolveLocation(state, lga);
+  if (!location) throw httpError("Choose a supported state and one of its LGAs.", 400);
+  const level = EXPERIENCE_LEVELS.find((l) => l.value === experienceLevel);
+
+  const profile = await ArtisanProfile.findOne({ userId }).select("+residentialAddress");
+  // The admin is reviewing a snapshot of this profile; don't change it underneath them.
+  if (profile?.verificationStatus === "pending") {
+    throw httpError("Your profile can't be edited while it is under review.", 409, { code: "PROFILE_LOCKED" });
+  }
+
+  if (fullName) Object.assign(user, splitFullName(fullName));
+  const fields = {
+    categories: [tradeCategory],
+    experienceLevel: level.value,
+    yearsExperience: level.years,
+    state: location.state,
+    lga: location.lga,
+    bio: bio?.trim() || null,
+    residentialAddress: residentialAddress.trim(),
+  };
+
+  let saved = profile;
+  if (profile) {
+    profile.set(fields);
+    await profile.save();
+  } else {
+    saved = await ArtisanProfile.create({
+      ...fields,
+      userId,
+      businessName: `${user.firstName} ${user.lastName}`.trim(), // no "business name" on the design: default to their name
+    });
+  }
+
+  Object.assign(user, { state: location.state, lga: location.lga, profileCompleted: true });
+  await user.save();
+
+  return await getMyProfile(userId);
+}
+
+// The owner's own view: includes the private residential address and document metadata.
+export async function getMyProfile(userId) {
+  const profile = await ArtisanProfile.findOne({ userId }).select("+residentialAddress +verificationDocuments");
+  if (!profile) throw httpError("Create your artisan profile first.", 404);
+  return profile.toJSON();
+}
+
+// Identity step: upload the NIN/BVN slip (front & back). Replaces any previously uploaded set.
+// `files` come from the upload middleware (already type/size/signature checked, in staging).
+export async function uploadIdentityDocuments(userId, files) {
+  const discard = () => Promise.all(files.map((f) => fs.rm(f.path, { force: true })));
+  try {
+    const profile = await ArtisanProfile.findOne({ userId }).select("+verificationDocuments");
+    if (!profile) throw httpError("Complete your profile before uploading documents.", 404);
+    if (["pending", "approved"].includes(profile.verificationStatus)) {
+      throw httpError(
+        profile.verificationStatus === "pending" ? "Your verification is already under review." : "You are already verified.",
+        409
+      );
+    }
+
+    const dir = identityDir(userId);
+    const previous = profile.verificationDocuments.map((d) => d.filename);
+    const documents = [];
+    for (const file of files) {
+      await fs.rename(file.path, path.join(dir, file.filename));
+      documents.push({ filename: file.filename, mimeType: file.mimetype, sizeBytes: file.size, sha256: file.sha256, uploadedAt: new Date() });
+    }
+    profile.verificationDocuments = documents;
+    await profile.save();
+
+    await Promise.all(previous.map((name) => fs.rm(path.join(dir, path.basename(name)), { force: true })));
+    return { documents: documents.map((d, index) => ({ index, mimeType: d.mimeType, sizeBytes: d.sizeBytes, uploadedAt: d.uploadedAt })) };
+  } catch (error) {
+    await discard();
+    throw error;
+  }
+}
+
+const ageOn = (dob, now = new Date()) => {
+  let age = now.getUTCFullYear() - dob.getUTCFullYear();
+  const m = now.getUTCMonth() - dob.getUTCMonth();
+  if (m < 0 || (m === 0 && now.getUTCDate() < dob.getUTCDate())) age--;
+  return age;
+};
+
+// "Submit for Verification" — NIN/BVN + date of birth + consent. Needs the slip uploaded and the
+// live selfie submitted first. Raw ID number is hashed before it touches the database — see
+// utils/hashIdNumber.js. Goes to the admin queue as "pending".
+export async function submitVerification(userId, { idType, idNumber, dateOfBirth, consent }) {
+  const profile = await ArtisanProfile.findOne({ userId }).select("+verificationDocuments");
   if (!profile) throw httpError("Create your artisan profile first.", 404);
 
-  profile.set({
-    verificationIdType: idType,
-    verificationIdNumberHash: hashIdNumber(idNumber),
-    verificationIdNumberLast4: lastFourDigits(idNumber),
-    verificationStatus: "pending",
-    verificationRejectionReason: null,
-  });
-  await profile.save();
+  if (profile.verificationStatus === "pending") throw httpError("Your verification is already under review.", 409);
+  if (profile.verificationStatus === "approved") throw httpError("You are already verified.", 409);
 
-  return { status: profile.verificationStatus };
+  if (consent !== true && consent !== "true") throw httpError("You must consent to the verification of your NIN/BVN.", 400);
+
+  const dob = new Date(dateOfBirth);
+  const minAge = Number(process.env.MIN_ARTISAN_AGE || 18);
+  if (ageOn(dob) < minAge) throw httpError(`You must be at least ${minAge} years old to register as an artisan.`, 400);
+
+  const user = await User.findById(userId).select("selfieStatus");
+  const missing = [];
+  if (!profile.verificationDocuments.length) missing.push("documents");
+  if (selfieRequired() && !["pending_review", "approved"].includes(user?.selfieStatus)) missing.push("selfie");
+  if (missing.length) {
+    throw httpError("Complete every verification step before submitting.", 422, { code: "VERIFICATION_INCOMPLETE", missing });
+  }
+
+  // One NIN/BVN can only back one active artisan account
+  const hash = hashIdNumber(idNumber);
+  const taken = await ArtisanProfile.exists({
+    verificationIdNumberHash: hash,
+    _id: { $ne: profile._id },
+    verificationStatus: { $in: ["pending", "approved"] },
+  });
+  if (taken) throw httpError("This NIN/BVN is already registered to another account.", 409, { code: "ID_ALREADY_USED" });
+
+  const now = new Date();
+  // Atomic: only one of two parallel submits can move not_submitted/rejected -> pending
+  const result = await ArtisanProfile.updateOne(
+    { _id: profile._id, verificationStatus: { $in: ["not_submitted", "rejected"] } },
+    {
+      verificationIdType: idType,
+      verificationIdNumberHash: hash,
+      verificationIdNumberLast4: lastFourDigits(idNumber),
+      verificationConsentAt: now,
+      verificationSubmittedAt: now,
+      verificationStatus: "pending",
+      verificationRejectionReason: null,
+      verificationDocsPurgeAfter: null,
+    }
+  );
+  if (result.matchedCount === 0) throw httpError("Your verification is already under review.", 409);
+  await User.updateOne({ _id: userId }, { dateOfBirth: dob });
+
+  return { status: "pending", submittedAt: now, estimatedReviewHours: reviewHours() };
+}
+
+// Drives routing after login and the "Your Account is Under Review" screen (timeline + next steps).
+export async function getOnboardingStatus(userId) {
+  const [user, profile] = await Promise.all([
+    User.findById(userId),
+    ArtisanProfile.findOne({ userId }).select("+verificationDocuments"),
+  ]);
+  if (!user) throw httpError("User not found.", 404);
+
+  const status = profile?.verificationStatus ?? "not_submitted";
+  const steps = {
+    accountVerified: Boolean(user.emailVerified || user.phoneVerified),
+    profileCompleted: Boolean(profile),
+    documentsUploaded: Boolean(profile?.verificationDocuments?.length),
+    selfieSubmitted: ["pending_review", "approved"].includes(user.selfieStatus),
+    submitted: ["pending", "approved", "rejected"].includes(status),
+    approved: status === "approved",
+  };
+
+  let nextStep;
+  if (!steps.accountVerified) nextStep = "verify_account";
+  else if (!steps.profileCompleted) nextStep = "complete_profile";
+  else if (status === "approved") nextStep = "approved";
+  else if (status === "pending") nextStep = "under_review";
+  else if (!steps.documentsUploaded) nextStep = "identity_verification"; // includes "rejected": re-upload and resubmit
+  else if (selfieRequired() && !steps.selfieSubmitted) nextStep = "selfie";
+  else nextStep = "ready_to_submit";
+  if (status === "rejected" && nextStep === "identity_verification") nextStep = "rejected";
+
+  const decided = status === "approved" || status === "rejected";
+  return {
+    nextStep,
+    steps,
+    verificationStatus: status,
+    selfieStatus: user.selfieStatus,
+    rejectionReason: status === "rejected" ? profile.verificationRejectionReason : null,
+    estimatedReviewHours: reviewHours(),
+    // The three rows of the timeline on the review screen
+    timeline: {
+      registration: { status: steps.submitted ? "completed" : "in_progress", at: profile?.verificationSubmittedAt ?? user.createdAt },
+      review: { status: decided ? "completed" : status === "pending" ? "in_progress" : "not_started" },
+      decision: { status: decided ? status : "pending", at: decided ? profile.verificationReviewedAt : null },
+    },
+  };
 }
 
 // Admin: artisans awaiting manual verification review
 export async function listPendingVerifications() {
-  const profiles = await ArtisanProfile.find({ verificationStatus: "pending" }).sort({ updatedAt: 1 });
+  const profiles = await ArtisanProfile.find({ verificationStatus: "pending" })
+    .select("+residentialAddress +verificationDocuments")
+    .sort({ verificationSubmittedAt: 1, updatedAt: 1 });
   const users = await User.find({ _id: { $in: profiles.map((p) => p.userId) } }).select(
-    "firstName lastName email phone selfieStatus"
+    "firstName lastName email phone selfieStatus dateOfBirth avatarUrl"
   );
   const userById = new Map(users.map((u) => [String(u._id), u.toJSON()]));
   return profiles.map((p) => ({ ...p.toJSON(), user: userById.get(String(p.userId)) || null }));
+}
+
+// Admin: stream-ready path for one uploaded ID document
+export async function getDocumentFile(artisanId, index) {
+  const profile = await ArtisanProfile.findById(artisanId).select("+verificationDocuments");
+  const doc = profile?.verificationDocuments?.[Number(index)];
+  if (!doc) throw httpError("Document not found.", 404);
+  // filename is generated by us (hex + ext); basename() is belt and braces against path tricks
+  return { file: path.join(identityDir(profile.userId), path.basename(doc.filename)), mimeType: doc.mimeType };
+}
+
+// Housekeeping (see server.js): delete ID documents once their retention window has passed.
+export async function purgeIdentityDocuments() {
+  const due = await ArtisanProfile.find({ verificationDocsPurgeAfter: { $lte: new Date() }, "verificationDocuments.0": { $exists: true } }).select("userId");
+  for (const p of due) {
+    await fs.rm(identityDir(p.userId), { recursive: true, force: true });
+    await ArtisanProfile.updateOne({ _id: p._id }, { verificationDocuments: [], verificationDocsPurgeAfter: null });
+  }
+  return due.length;
 }
 
 // Admin: approve/reject + set tier
@@ -131,26 +349,55 @@ export async function reviewVerification(artisanId, adminId, { decision, tier, r
   const profile = await ArtisanProfile.findById(artisanId);
   if (!profile) throw httpError("Artisan not found.", 404);
 
-  // An artisan can't be approved until their live selfie check has been approved
-  // (turn off with REQUIRE_SELFIE_FOR_ARTISAN_APPROVAL=false).
-  if (decision === "approved" && process.env.REQUIRE_SELFIE_FOR_ARTISAN_APPROVAL !== "false") {
-    const owner = await User.findById(profile.userId).select("selfieStatus");
-    if (owner?.selfieStatus !== "approved") {
-      throw httpError("This artisan's live selfie verification must be approved first.", 409, {
-        code: "SELFIE_REQUIRED",
-        selfieStatus: owner?.selfieStatus ?? "not_started",
-      });
-    }
+  // Only a submitted profile can be decided. Without this an admin (or a mistaken call) could
+  // approve an artisan who never uploaded an ID or took a selfie.
+  if (profile.verificationStatus !== "pending") {
+    throw httpError(
+      profile.verificationStatus === "not_submitted"
+        ? "This artisan has not submitted their verification yet."
+        : "This verification has already been decided.",
+      409,
+      { code: profile.verificationStatus === "not_submitted" ? "NOT_SUBMITTED" : "ALREADY_DECIDED" }
+    );
   }
 
-  profile.set({
-    verificationStatus: decision,
-    verificationReviewedBy: adminId,
-    verificationReviewedAt: new Date(),
-    verificationTier: decision === "approved" ? tier || "basic" : "unverified",
-    verificationRejectionReason: decision === "rejected" ? rejectionReason || null : null,
-  });
-  await profile.save();
+  // An artisan can't be approved until their live selfie check has been approved
+  // (turn off with REQUIRE_SELFIE_FOR_ARTISAN_APPROVAL=false).
+  const owner = await User.findById(profile.userId);
+  if (decision === "approved" && selfieRequired() && owner?.selfieStatus !== "approved") {
+    throw httpError("This artisan's live selfie verification must be approved first.", 409, {
+      code: "SELFIE_REQUIRED",
+      selfieStatus: owner?.selfieStatus ?? "not_started",
+    });
+  }
 
-  return profile;
+  const approved = decision === "approved";
+  const retentionDays = Number(process.env.ID_DOC_RETENTION_DAYS || 30);
+  const now = new Date();
+
+  // Atomic: two admins deciding at once can't both win
+  const result = await ArtisanProfile.updateOne(
+    { _id: profile._id, verificationStatus: "pending" },
+    {
+      verificationStatus: decision,
+      verificationReviewedBy: adminId,
+      verificationReviewedAt: now,
+      verificationTier: approved ? tier || "basic" : "unverified",
+      verificationRejectionReason: approved ? null : rejectionReason || null,
+      // approved: keep the ID slip for the audit window then delete; rejected: delete now
+      verificationDocsPurgeAfter: approved ? new Date(now.getTime() + retentionDays * 24 * 3600 * 1000) : now,
+      ...(approved ? {} : { verificationDocuments: [] }),
+    }
+  );
+  if (result.matchedCount === 0) throw httpError("This verification has already been decided.", 409, { code: "ALREADY_DECIDED" });
+  if (!approved) await fs.rm(identityDir(profile.userId), { recursive: true, force: true });
+
+  // "You'll be notified once the review is complete."
+  if (owner) {
+    await notifyUser(owner, approved
+      ? { subject: "You're verified on iSabiKraft", text: "Good news! Your iSabiKraft artisan account has been verified. You can now receive job requests from customers." }
+      : { subject: "Your iSabiKraft verification needs attention", text: `We couldn't verify your iSabiKraft account${rejectionReason ? `: ${rejectionReason}` : "."} Open the app to update your details and submit again.` });
+  }
+
+  return await ArtisanProfile.findById(profile._id);
 }
