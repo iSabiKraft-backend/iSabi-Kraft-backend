@@ -26,10 +26,10 @@ import asyncHandler from './utils/asyncHandler.js';
 import errorHandler from './middleware/errorHandler.js';
 
 const app = express();
-
-if (process.env.TRUST_PROXY) {
-  app.set('trust proxy', Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY);
-}
+// Required for correct client IP detection behind Render's proxy.
+app.set('trust proxy', 1);
+//if (process.env.TRUST_PROXY) {
+//  app.set('trust proxy', Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY);}
 
 app.use(helmet());
 app.use(cors({ origin: process.env.CLIENT_URL ? process.env.CLIENT_URL.split(',') : false }));
