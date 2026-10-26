@@ -1,6 +1,6 @@
 import nodemailer from "nodemailer";
 import { httpError } from "../utils/httpError.js";
-import Notification from "../models/notificationModel.js";
+//import Notification from "../models/notificationModel.js";
 
 let transporter;
 const getTransporter = () => {
