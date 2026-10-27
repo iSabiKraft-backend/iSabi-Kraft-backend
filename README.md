@@ -76,3 +76,8 @@ The frames are stored privately (never served statically) and deleted after revi
 Artisans: an admin cannot approve an artisan (PATCH /artisans/:id/verification) until that artisan's selfie is approved (409 code SELFIE_REQUIRED).
 Limits: this proves a live, human-paced, challenge-response capture reviewed by a person. It does not do automated face matching or
 deep-fake/spoof detection — for that, a provider will be integrated to handle this, such as Smile ID, Dojah or Youverify into submitSession().
+
+
+## Cookie-based login
+
+`verify`, `login` and `social` also set an **HttpOnly** session cookie (`isk_session`; `Secure` in production, `SameSite=Lax` by default). Browsers just call the API with `credentials: "include"` (fetch) / `withCredentials: true` (axios) — no token handling in JavaScript. "Remember me" makes it a 30-day persistent cookie; otherwise it is a session cookie. `POST /api/auth/logout` clears it.
