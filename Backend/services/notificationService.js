@@ -1,11 +1,6 @@
 import nodemailer from "nodemailer";
 import { httpError } from "../utils/httpError.js";
-
-// Email: any SMTP provider (SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS / EMAIL_FROM).
-// SMS:   Termii (TERMII_API_KEY / TERMII_SENDER_ID / optional TERMII_BASE_URL) — a common Nigerian provider.
-// With neither configured, messages are printed to the server console in development
-// so the whole flow can be tested without paying for a provider. In production an
-// unconfigured provider is an error (503) rather than a silent no-op.
+//import Notification from "../models/notificationModel.js";
 
 let transporter;
 const getTransporter = () => {
@@ -29,7 +24,6 @@ const devFallback = (kind, to, text) => {
 export async function sendEmail({ to, subject, text }) {
   const mailer = getTransporter();
   if (!mailer) return devFallback("EMAIL", to, `${subject} — ${text}`);
-
   try {
     await mailer.sendMail({ from: process.env.EMAIL_FROM || process.env.SMTP_USER, to, subject, text });
   } catch (error) {
@@ -40,7 +34,6 @@ export async function sendEmail({ to, subject, text }) {
 
 export async function sendSms({ to, text }) {
   if (!process.env.TERMII_API_KEY) return devFallback("SMS", to, text);
-
   try {
     const response = await fetch(`${process.env.TERMII_BASE_URL || "https://api.ng.termii.com"}/api/sms/send`, {
       method: "POST",
@@ -61,19 +54,58 @@ export async function sendSms({ to, text }) {
   }
 }
 
-export const send = (channel, to, { subject, text }) =>
-  channel === "email" ? sendEmail({ to, subject, text }) : sendSms({ to, text });
+/**
+ * Create an in-app notification. Notification failures are intentionally isolated
+ * from the main transaction so a temporary notification/database problem cannot
+ * cause a payment, quote, or job operation to be reported as failed.
+ */
+export async function createInAppNotification({
+  recipientID,
+  senderID = null,
+  type,
+  title,
+  message,
+  jobID = null,
+  quoteID = null,
+  escrowID = null,
+  metadata = {},
+}) {
+  if (!recipientID) return null;
+  return Notification.create({
+    recipientID,
+    senderID,
+    type,
+    title,
+    message,
+    jobID,
+    quoteID,
+    escrowID,
+    metadata,
+  });
+}
 
-// Tell a user something (e.g. "your verification was approved"), by email if they have a verified
-// one, otherwise SMS to a verified phone. Best-effort: a failed notification is logged and never
-// breaks the action that triggered it.
-export async function notifyUser(user, { subject, text }) {
+export async function notifyUser(payload) {
   try {
-    if (user.email && user.emailVerified) return await sendEmail({ to: user.email, subject, text });
-    if (user.phone && user.phoneVerified) return await sendSms({ to: user.phone, text });
-    if (user.email) return await sendEmail({ to: user.email, subject, text });
-    if (user.phone) return await sendSms({ to: user.phone, text });
+    return await createInAppNotification(payload);
   } catch (error) {
-    console.error("Notification failed:", error.message);
+    console.error("In-app notification failed:", error.message);
+    return null;
   }
 }
+
+export async function notifyUsers(recipients, payload) {
+  const uniqueRecipients = [...new Set(recipients.filter(Boolean).map(String))];
+  if (!uniqueRecipients.length) return [];
+  try {
+    return await Notification.insertMany(
+      uniqueRecipients.map((recipientID) => ({ ...payload, recipientID })),
+      { ordered: false }
+    );
+  } catch (error) {
+    console.error("Bulk in-app notification failed:", error.message);
+    return [];
+  }
+}
+
+export const send = (channel, to, { subject, text }) =>
+  channel === "email" ? sendEmail({ to, subject, text }) : sendSms({ to, text });
