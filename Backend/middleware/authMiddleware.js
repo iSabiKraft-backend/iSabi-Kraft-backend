@@ -1,30 +1,32 @@
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import User from "../models/userModel.js";
+import { readCookie, originAllowed } from "../utils/authCookie.js";
 
 dotenv.config();
 
 export const authenticateUser = async (req, res, next) => {
   try {
-    // Get Authorization header
+    // Credentials: a Bearer header wins (mobile / API clients); otherwise the HttpOnly session cookie.
     const authHeader = req.headers.authorization;
+    let token;
 
-    // Check if header exists
-    if (!authHeader) {
-      return res.status(401).json({
-        success: false,
-        message: "Access denied. No token provided.",
-      });
-    }
-
-    // Expected format: Bearer <token>
-    const [bearer, token] = authHeader.split(" ");
-
-    if (bearer !== "Bearer" || !token) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid authorization format.",
-      });
+    if (authHeader) {
+      const [bearer, value] = authHeader.split(" ");
+      if (bearer !== "Bearer" || !value) {
+        return res.status(401).json({ success: false, message: "Invalid authorization format." });
+      }
+      token = value;
+    } else {
+      token = readCookie(req);
+      if (!token) {
+        return res.status(401).json({ success: false, message: "Access denied. No token provided." });
+      }
+      // Cookies are attached automatically by the browser, so state-changing requests that rely on
+      // one must come from our own frontend (CSRF protection; Bearer requests are not affected).
+      if (!["GET", "HEAD", "OPTIONS"].includes(req.method) && !originAllowed(req)) {
+        return res.status(403).json({ success: false, message: "Request origin not allowed.", code: "BAD_ORIGIN" });
+      }
     }
 
     // Verify token
