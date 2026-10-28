@@ -20,16 +20,17 @@ import quoteRoutes from './routes/quoteRoutes.js';
 import reviewRoutes from './routes/reviewRoutes.js';
 import locationRoutes from './routes/locationRoute.js';
 import selfieVerificationRoutes from './routes/selfieVerificationRoute.js';
+import notificationRoutes from './routes/notificationRoutes.js';
 
 import { paystackWebhook } from './controllers/paystackWebhookController.js';
 import asyncHandler from './utils/asyncHandler.js';
 import errorHandler from './middleware/errorHandler.js';
 
 const app = express();
-// Required for correct client IP detection behind Render's proxy.
-app.set('trust proxy', 1);
-//if (process.env.TRUST_PROXY) {
-//  app.set('trust proxy', Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY);}
+
+if (process.env.TRUST_PROXY) {
+  app.set('trust proxy', Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY);
+}
 
 app.use(helmet());
 app.use(cors({ origin: process.env.CLIENT_URL ? process.env.CLIENT_URL.split(',') : false }));
@@ -59,6 +60,7 @@ app.use('/api/quotes', quoteRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/locations', locationRoutes);
 app.use('/api/verification/selfie', selfieVerificationRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/disputes', disputeRoutes);
 app.use('/api/escrow', escrowRoutes);
 app.use('/api/payments', paymentRoutes);

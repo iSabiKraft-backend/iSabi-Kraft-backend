@@ -8,6 +8,7 @@ import {
     verifyPayment,
     transferToArtisan,
 } from "./paystackService.js";
+import { notifyUser } from "./notificationService.js";
 
 const httpError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
 const toKobo = (naira) => Math.round(Number(naira) * 100);
@@ -302,10 +303,22 @@ const handlePaystackWebhook = async (event, data) => {
         : { $set: { materialPaymentStatus: "failed" }, $inc: { materialAttempts: 1 } }
     );
     if (succeeded) {
-      await Escrow.updateOne(
+      const updated = await Escrow.findOneAndUpdate(
         { _id: transaction.escrowID, status: { $ne: "disputed" } },
-        { $set: { status: "material_payment_made" } }
+        { $set: { status: "material_payment_made" } },
+        { new: true }
       );
+      if (updated) {
+        await notifyUser({
+          recipientID: updated.artisanId,
+          type: "material_payment",
+          title: "Material payment received",
+          message: `Material payment of ₦${Number(updated.materialAmount).toLocaleString()} has been released for your job.`,
+          jobID: updated.jobId,
+          escrowID: updated._id,
+          metadata: { amount: updated.materialAmount, reference: transaction.reference },
+        });
+      }
     }
   } else if (transaction.transactionType === "balance_release") {
     await Escrow.updateOne(
@@ -315,10 +328,22 @@ const handlePaystackWebhook = async (event, data) => {
         : { $set: { balancePaymentStatus: "failed" }, $inc: { balanceAttempts: 1 } }
     );
     if (succeeded) {
-      await Escrow.updateOne(
+      const updated = await Escrow.findOneAndUpdate(
         { _id: transaction.escrowID, status: { $ne: "disputed" } },
-        { $set: { status: "balance_released" } }
+        { $set: { status: "balance_released" } },
+        { new: true }
       );
+      if (updated) {
+        await notifyUser({
+          recipientID: updated.artisanId,
+          type: "balance_payment",
+          title: "Final balance paid",
+          message: `The remaining balance of ₦${Number(updated.remainingAmount).toLocaleString()} has been released for your job.`,
+          jobID: updated.jobId,
+          escrowID: updated._id,
+          metadata: { amount: updated.remainingAmount, reference: transaction.reference },
+        });
+      }
     }
   }
 };
