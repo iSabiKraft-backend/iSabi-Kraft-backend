@@ -2,13 +2,14 @@ import express from "express";
 import rateLimit from "express-rate-limit";
 
 import {
-    register,
-    verify,
-    resendVerification,
-    login,
-    forgotPassword,
-    resetPassword,
-    social,
+  register,
+  verify,
+  resendVerification,
+  login,
+  logout,
+  forgotPassword,
+  resetPassword,
+  social,
 } from "../controllers/authController.js";
 
 import {
@@ -44,6 +45,7 @@ route.post("/resend-verification", resendVerificationValidator, validateRequest,
 
 // Login
 route.post("/login", loginValidator, validateRequest, login);
+route.post("/logout", logout);
 route.post("/social", socialLoginValidator, validateRequest, social);
 
 // Password recovery

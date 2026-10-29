@@ -1,9 +1,8 @@
-
 import { supabase } from "../config/supabase.js";
 
 export const authenticateUser = async (req, res, next) => {
   try {
-    // Get Authorization header
+    // Credentials: a Bearer header wins (mobile / API clients); otherwise the HttpOnly session cookie.
     const authHeader = req.headers.authorization;
 
     if (!authHeader) {
