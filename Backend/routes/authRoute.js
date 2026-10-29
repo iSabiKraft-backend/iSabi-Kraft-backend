@@ -5,6 +5,7 @@ import {
   verify,
   resendVerification,
   login,
+  logout,
   forgotPassword,
   resetPassword,
   social,
@@ -38,6 +39,7 @@ route.post("/resend-verification", resendVerificationValidator, validateRequest,
 
 // --- Sign in ---
 route.post("/login", loginValidator, validateRequest, login);
+route.post("/logout", logout);
 route.post("/social", socialLoginValidator, validateRequest, social);
 
 // --- Forgot password -> Check your email/SMS -> Enter code -> Create new password -> Password reset ---

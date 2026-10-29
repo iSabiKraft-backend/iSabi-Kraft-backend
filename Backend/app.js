@@ -33,7 +33,7 @@ if (process.env.TRUST_PROXY) {
 }
 
 app.use(helmet());
-app.use(cors({ origin: process.env.CLIENT_URL ? process.env.CLIENT_URL.split(',') : false }));
+app.use(cors({ origin: process.env.CLIENT_URL ? process.env.CLIENT_URL.split(',').map((s) => s.trim()) : false, credentials: true }));
 
 // Paystack webhook needs the RAW body to verify its signature
 app.post('/api/payments/paystack/webhook', express.raw({ type: 'application/json' }), paystackWebhook);
