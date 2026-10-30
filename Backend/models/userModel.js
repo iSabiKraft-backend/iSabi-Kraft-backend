@@ -20,8 +20,11 @@ const userSchema = new mongoose.Schema(
     },
     phone: { type: String, unique: true, sparse: true, trim: true }, // normalized "+234..."
 
-    // select:false -> never loaded unless explicitly asked for (login).
-    // Absent for accounts created with Google/Apple.
+    // Supabase Auth owns credentials; this ID links its identity to the MongoDB profile.
+    supabaseUserId: { type: String, unique: true, sparse: true },
+
+    // Legacy field retained only for existing records during migration. New passwords
+    // are stored and verified by Supabase Auth, never by this application.
     password: { type: String, select: false },
     passwordChangedAt: { type: Date }, // bumped on reset; tokens carry the value they were issued under
 

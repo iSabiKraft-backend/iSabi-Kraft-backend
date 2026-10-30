@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node Backend/server.js",
     "dev": "node --watch Backend/server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "seed:admin": "node Backend/seeds/adminSeed.js"
+
   },
   "keywords": [],
   "author": "",

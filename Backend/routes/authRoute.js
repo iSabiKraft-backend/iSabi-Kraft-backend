@@ -10,7 +10,9 @@ import {
   forgotPassword,
   resetPassword,
   social,
+  syncProfile,
 } from "../controllers/authController.js";
+import { authenticateUser } from "../middleware/authMiddleware.js";
 
 import {
     registerValidator,
@@ -47,9 +49,11 @@ route.post("/resend-verification", resendVerificationValidator, validateRequest,
 route.post("/login", loginValidator, validateRequest, login);
 route.post("/logout", logout);
 route.post("/social", socialLoginValidator, validateRequest, social);
+// Call after signup/login performed directly with the Supabase mobile SDK.
+route.post("/sync-profile", syncProfile);
 
 // Password recovery
 route.post("/forgot-password", forgotPasswordValidator, validateRequest, forgotPassword);
-route.post("/reset-password", resetPasswordValidator, validateRequest, resetPassword);
+route.post("/reset-password", authenticateUser, resetPasswordValidator, validateRequest, resetPassword);
 
 export default route;
