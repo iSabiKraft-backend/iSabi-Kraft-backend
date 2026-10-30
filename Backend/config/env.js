@@ -13,7 +13,7 @@ dotenv.config({
   ],
 });
 
-const required = ['MONGODB_URI', 'JWT_SECRET', 'PAYSTACK_SECRET_KEY'];
+const required = ['MONGODB_URI', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'PAYSTACK_SECRET_KEY'];
 
 export const validateEnv = () => {
   const needed = process.env.NODE_ENV === 'production' ? [...required, 'ID_HASH_PEPPER'] : required;

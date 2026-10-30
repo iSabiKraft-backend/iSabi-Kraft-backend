@@ -59,7 +59,7 @@ export const registerValidator = [
 // "Verify Your Account" — 6-digit code
 export const verifyValidator = [
   identifierField(),
-  body("code").isString().trim().matches(/^\d{6}$/).withMessage("Enter the 6-digit code"),
+  body("code").isString().trim().matches(/^\d{6}$/).withMessage("Enter the 6-digit code")
 ];
 
 export const resendVerificationValidator = [identifierField()];
