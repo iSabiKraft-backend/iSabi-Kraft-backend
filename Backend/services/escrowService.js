@@ -92,7 +92,11 @@ export const startPayment = async (job, customer) => {
 };
 
 export const confirmPayment = async (reference, tx) => {
-  const payment = await Payment.findOne({ reference });
+  if (typeof reference !== "string" || !reference.trim()) {
+    throw httpError(400, "Invalid payment reference");
+  }
+  const safeReference = reference.trim();
+  const payment = await Payment.findOne({ reference: safeReference });
   if (!payment) return null;
 
   if (payment.status === "pending") {
@@ -104,7 +108,7 @@ export const confirmPayment = async (reference, tx) => {
       return payment;
     }
     if (
-      tx.reference !== reference ||
+      tx.reference !== safeReference ||
       tx.amount !== toKobo(payment.amount) ||
       tx.currency !== "NGN"
     ) {
@@ -112,7 +116,7 @@ export const confirmPayment = async (reference, tx) => {
       payment.note = "amount_mismatch";
       await payment.save();
       console.error("Paystack amount mismatch", {
-        reference,
+        reference: safeReference,
         paid: tx.amount,
         expected: toKobo(payment.amount),
       });
