@@ -1,74 +1,45 @@
 import mongoose from "mongoose";
-import { schemaOptions } from "../utils/schemaOptions.js";
 
-export const ESCROW_STATUSES = [
-  "pending",
-  "payment_confirmed",
-  "material_payment_made",
-  "balance_released",
-  "disputed",
-  "refunded",
-  "failed",
-];
-
-// "processing" = a Paystack transfer for that leg has been claimed/started and
-// we're waiting for the webhook. It is what stops a double click paying twice.
 const escrowSchema = new mongoose.Schema(
   {
-    customerId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-        required: true
+    customerID: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
     },
-    artisanId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-        required: true
+    artisanID: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
     },
-    jobId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Job",
-        required: true
+    jobID: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Job",
+      required: true,
+      unique: true,
     },
-        currency: {
-        type: String,
-        default: "NGN"
+    currency: { type: String, default: "NGN" },
+    totalAmount: { type: Number, required: true },
+    materialAmount: { type: Number, required: true },
+    remainingAmount: { type: Number, required: true },
+    heldAmount: { type: Number, default: 0 },
+    refundedAmount: { type: Number, default: 0 },
+    reference: { type: String, required: true, unique: true },
+    paymentReference: String,
+    status: {
+      type: String,
+      enum: [
+        "pending",
+        "payment_confirmed",
+        "material_payment_made",
+        "balance_released",
+        "disputed",
+        "refunded",
+        "failed",
+      ],
+      default: "pending",
     },
-    totalAmount: {
-        type: Number,
-        required: true,
-        min: 0
-    },
-    materialAmount: {
-        type: Number,
-        required: true,
-        min: 0
-    },
-    remainingAmount: {
-        type: Number,
-        required: true,
-        min: 0
-    },
-    heldAmount: {
-        type: Number,
-        required: true,
-        min: 0
-    },  
-    reference: {
-        type: String,
-        required: true,
-        unique: true
-    },
-    paystackReference: {
-        type: String,
-        unique: true,
-        sparse: true
-    },
-    status: { 
-        type: String,
-        enum: ["pending","payment_confirmed", "material_payment_made", "balance_released", "disputed", "refunded", "failed"],
-        default: "pending"
-    },
+    statusBeforeDispute: String,
     materialPaymentStatus: {
       type: String,
       enum: ["pending", "processing", "completed", "failed", "not_applicable"],
@@ -79,21 +50,11 @@ const escrowSchema = new mongoose.Schema(
       enum: ["pending", "processing", "completed", "failed"],
       default: "pending",
     },
-    materialAttempts: { type: Number, default: 0, min: 0 },
-    balanceAttempts: { type: Number, default: 0, min: 0 },
-    materialTransferCode: {
-        type: String
-    },
-    finalTransferCode: {
-        type: String
-    },
-    completedAt: {
-        type: Date
-    }
+    materialTransferCode: String,
+    finalTransferCode: String,
+    completedAt: Date,
   },
-  schemaOptions
+  { timestamps: true },
 );
-
-escrowSchema.index({ jobId: 1 }, { unique: true });
 
 export default mongoose.model("Escrow", escrowSchema);
