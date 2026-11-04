@@ -518,7 +518,7 @@ const refundHeld = async (escrow, amount) => {
   }
   await Job.updateOne({ _id: escrow.jobID }, { $set: { status: "cancelled" } });
 };
-
+      "metadata.paymentReference": { $eq: paymentReference },
 export const finalizeRefund = async (paymentReference, success, data) => {
   const txn = await EscrowTransaction.findOneAndUpdate(
     {
@@ -547,7 +547,7 @@ export const finalizeRefund = async (paymentReference, success, data) => {
   );
   await Job.updateOne(
     { _id: (await Escrow.findById(txn.escrowID))?.jobID },
-    { $set: { status: "disputed" } },
+  const paymentReference = String(data?.transaction_reference || "").trim();
   );
   return txn;
 };
