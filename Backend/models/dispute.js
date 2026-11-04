@@ -1,45 +1,40 @@
 import mongoose from "mongoose";
-import { schemaOptions } from "../utils/schemaOptions.js";
-
-const evidenceSchema = new mongoose.Schema(
-  {
-    url: { type: String, required: true, trim: true, maxlength: 2048 },
-    publicId: { type: String, trim: true, maxlength: 500, default: "" },
-    resourceType: { type: String, enum: ["image", "video"], default: "image" },
-    note: { type: String, trim: true, maxlength: 1000, default: "" },
-  },
-  { _id: false }
-);
 
 const disputeSchema = new mongoose.Schema(
   {
-    job: { type: mongoose.Schema.Types.ObjectId, ref: "Job", required: true },
-    customerId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-    artisanId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-    raisedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-    reason: { type: String, required: true, trim: true, maxlength: 120 },
-    description: { type: String, required: true, trim: true, maxlength: 5000 },
-    evidence: { type: [evidenceSchema], default: [] },
-    status: {
-      type: String,
-      enum: ["open", "under_review", "resolved", "dismissed"],
-      default: "open",
+    escrowID: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Escrow",
+      required: true,
       index: true,
     },
-    resolution: {
-      decision: { type: String, enum: ["refund_customer", "release_artisan", "split", "dismissed"] },
-      customerPercent: { type: Number, min: 0, max: 100 },
-      note: { type: String, trim: true, maxlength: 2000 },
-      resolvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-      resolvedAt: Date,
+    jobID: { type: mongoose.Schema.Types.ObjectId, ref: "Job", required: true },
+    raisedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
     },
-  },
-  schemaOptions
-);
+    reason: { type: String, required: true, trim: true, maxlength: 2000 },
+    evidence: [
+      {
+        url: { type: String, required: true },
+        note: { type: String, trim: true, maxlength: 500 },
+        addedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        addedAt: { type: Date, default: Date.now },
+      },
+    ],
 
-disputeSchema.index(
-  { job: 1 },
-  { unique: true, partialFilterExpression: { status: { $in: ["open", "under_review"] } } }
+    response: {
+      text: { type: String, trim: true, maxlength: 2000 },
+      respondedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      respondedAt: Date,
+    },
+    status: { type: String, enum: ["open", "resolved"], default: "open" },
+    resolution: { type: String, enum: ["release", "refund"] },
+    adminNote: { type: String, trim: true, maxlength: 1000 },
+    resolvedAt: Date,
+  },
+  { timestamps: true },
 );
 
 export default mongoose.model("Dispute", disputeSchema);

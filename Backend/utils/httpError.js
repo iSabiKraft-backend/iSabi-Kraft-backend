@@ -1,2 +1,8 @@
-// Error with an HTTP status and optional extra JSON fields (e.g. { requiresVerification: true }).
-export const httpError = (message, statusCode = 400, extra) => Object.assign(new Error(message), { statusCode, extra });
+export class HttpError extends Error {
+  constructor(statusCode, message) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
+export const httpError = (statusCode, message) => new HttpError(statusCode, message);
