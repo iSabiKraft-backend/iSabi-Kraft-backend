@@ -320,9 +320,15 @@ export const confirmCompletion = async (escrowId, customer) => {
 };
 
 export const finalizeTransfer = async (reference, success, data) => {
+  if (typeof reference !== "string" || !reference.trim()) {
+    throw httpError(400, "Invalid transfer reference");
+  }
+
+  const safeReference = reference.trim();
+
   const txn = await EscrowTransaction.findOneAndUpdate(
     {
-      reference,
+      reference: safeReference,
       status: "pending",
       transactionType: { $in: ["material_payment", "balance_release"] },
     },
