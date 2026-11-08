@@ -92,7 +92,11 @@ export const startPayment = async (job, customer) => {
 };
 
 export const confirmPayment = async (reference, tx) => {
-  const payment = await Payment.findOne({ reference });
+  if (typeof reference !== "string" || !reference.trim()) {
+    throw httpError(400, "Invalid payment reference");
+  }
+  const safeReference = reference.trim();
+  const payment = await Payment.findOne({ reference: safeReference });
   if (!payment) return null;
 
   if (payment.status === "pending") {
@@ -104,7 +108,7 @@ export const confirmPayment = async (reference, tx) => {
       return payment;
     }
     if (
-      tx.reference !== reference ||
+      tx.reference !== safeReference ||
       tx.amount !== toKobo(payment.amount) ||
       tx.currency !== "NGN"
     ) {
@@ -112,7 +116,7 @@ export const confirmPayment = async (reference, tx) => {
       payment.note = "amount_mismatch";
       await payment.save();
       console.error("Paystack amount mismatch", {
-        reference,
+        reference: safeReference,
         paid: tx.amount,
         expected: toKobo(payment.amount),
       });
@@ -343,9 +347,15 @@ export const approveCompletedJobRelease = async (escrowId) => {
 };
 
 export const finalizeTransfer = async (reference, success, data) => {
+  if (typeof reference !== "string" || !reference.trim()) {
+    throw httpError(400, "Invalid transfer reference");
+  }
+
+  const safeReference = reference.trim();
+
   const txn = await EscrowTransaction.findOneAndUpdate(
     {
-      reference,
+      reference: safeReference,
       status: "pending",
       transactionType: { $in: ["material_payment", "balance_release"] },
     },
@@ -535,7 +545,7 @@ const refundHeld = async (escrow, amount) => {
   }
   await Job.updateOne({ _id: escrow.jobID }, { $set: { status: "cancelled" } });
 };
-
+      "metadata.paymentReference": { $eq: paymentReference };
 export const finalizeRefund = async (paymentReference, success, data) => {
   const txn = await EscrowTransaction.findOneAndUpdate(
     {
@@ -564,7 +574,7 @@ export const finalizeRefund = async (paymentReference, success, data) => {
   );
   await Job.updateOne(
     { _id: (await Escrow.findById(txn.escrowID))?.jobID },
-    { $set: { status: "disputed" } },
+  const paymentReference = String(data?.transaction_reference || "").trim();
   );
   return txn;
 };

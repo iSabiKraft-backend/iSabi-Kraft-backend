@@ -125,9 +125,9 @@ export const transactions = async (req, res) => {
     transactionType: { $in: PAYOUT_TYPES },
   };
   if (PAYOUT_TYPES.includes(req.query.type))
-    filter.transactionType = req.query.type;
+    filter.transactionType = { $eq: req.query.type };
   if (["pending", "completed", "failed"].includes(req.query.status))
-    filter.status = req.query.status;
+    filter.status = { $eq: req.query.status };
 
   const all = (
     await EscrowTransaction.find(filter)
