@@ -5,6 +5,8 @@ import {
   reconcilePendingTransfers,
   reconcileTransfer,
   resolveDispute,
+  listPendingAdminReleases,
+  approveCompletedJobRelease,
 } from "../services/escrowService.js";
 import { httpError } from "../utils/httpError.js";
 import { objectId, text } from "../utils/validate.js";
@@ -88,6 +90,19 @@ export const reconcile = async (req, res) => {
     return res.json({ settled: Boolean(settled) });
   }
   res.json({ results: await reconcilePendingTransfers() });
+};
+
+
+export const pendingEscrowReleases = async (_req, res) => {
+  res.json({ releases: await listPendingAdminReleases() });
+};
+
+export const approveEscrowRelease = async (req, res) => {
+  res.json({
+    escrow: await approveCompletedJobRelease(
+      objectId(req.params.escrowId, "escrow id"),
+    ),
+  });
 };
 
 export const artisanDiscoveryDiagnostics = async (_req, res) => {

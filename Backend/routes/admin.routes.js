@@ -9,6 +9,8 @@ router.get("/verifications", admin.listVerifications);
 router.patch("/verifications/:userId", admin.reviewVerification);
 router.get("/disputes", admin.listDisputes);
 router.post("/disputes/:id/resolve", admin.resolve);
+router.get("/escrow-releases", admin.pendingEscrowReleases);
+router.post("/escrow-releases/:escrowId/approve", admin.approveEscrowRelease);
 router.post("/transfers/reconcile", admin.reconcile);
 router.post("/transfers/:reference/reconcile", admin.reconcile);
 

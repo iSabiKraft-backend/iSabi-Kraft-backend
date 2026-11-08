@@ -190,7 +190,7 @@ const payOut = async (escrow, kind, { allowedStatuses, amount }) => {
       [field]: { $in: ["pending", "failed"] },
     },
     { $set: { [field]: "processing" } },
-    { returnDocument: "after" },
+    { new: true },
   );
   if (!claimed)
     throw httpError(
@@ -271,7 +271,7 @@ export const markCompleted = async (escrowId, artisan, note, photos = []) => {
         progress: 100,
       },
     },
-    { returnDocument: "after"},
+    { new: true },
   );
   if (!job) throw httpError(409, "Job is not ready to be marked as completed");
   return escrow;
@@ -283,39 +283,66 @@ export const confirmCompletion = async (escrowId, customer) => {
     throw httpError(404, "Escrow not found");
 
   const job = await Job.findById(escrow.jobID);
-  if (job?.status !== "awaiting_confirmation")
-    throw httpError(409, "The artisan has not marked this job as completed");
+  if (job?.status !== "awaiting_confirmation" || !job.completionMarkedAt)
+    throw httpError(409, "The artisan has not submitted this job for completion");
+
+  // Customer confirmation does not bypass the mandatory three-day dispute window
+  // or the administrator's final payout approval.
+  return escrow;
+};
+
+export const listPendingAdminReleases = async () => {
+  const cutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+  const escrows = await Escrow.find({
+    status: { $in: HELD_STATES },
+    balancePaymentStatus: { $in: ["pending", "failed"] },
+  }).sort({ updatedAt: 1 });
+  const eligible = [];
+  for (const escrow of escrows) {
+    const job = await Job.findOne({
+      _id: escrow.jobID,
+      status: "awaiting_confirmation",
+      completionMarkedAt: { $lte: cutoff },
+    });
+    if (!job) continue;
+    const materialsSettled =
+      escrow.status === "material_payment_made" ||
+      (escrow.status === "payment_confirmed" &&
+        escrow.materialPaymentStatus === "not_applicable");
+    if (!materialsSettled) continue;
+    const dispute = await Dispute.findOne({ escrowID: escrow._id, status: "open" });
+    if (!dispute) eligible.push({ escrow, job, eligibleAt: new Date(job.completionMarkedAt.getTime() + 3 * 24 * 60 * 60 * 1000) });
+  }
+  return eligible;
+};
+
+export const approveCompletedJobRelease = async (escrowId) => {
+  const escrow = await Escrow.findById(escrowId);
+  if (!escrow || !HELD_STATES.includes(escrow.status))
+    throw httpError(409, "Escrow is not available for admin release");
+
+  const job = await Job.findOne({
+    _id: escrow.jobID,
+    status: "awaiting_confirmation",
+    completionMarkedAt: { $lte: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) },
+  });
+  if (!job)
+    throw httpError(409, "The three-day dispute window has not elapsed");
 
   const materialsSettled =
     escrow.status === "material_payment_made" ||
     (escrow.status === "payment_confirmed" &&
       escrow.materialPaymentStatus === "not_applicable");
   if (!materialsSettled)
-    throw httpError(
-      409,
-      "Material payment must be settled before confirming completion",
-    );
+    throw httpError(409, "Material payment must be settled before releasing the final balance");
 
-  if (escrow.remainingAmount <= 0) {
-    const done = await Escrow.findOneAndUpdate(
-      {
-        _id: escrow._id,
-        status: { $in: HELD_STATES },
-        balancePaymentStatus: "pending",
-      },
-      {
-        $set: {
-          status: "balance_released",
-          balancePaymentStatus: "completed",
-          completedAt: new Date(),
-        },
-      },
-      { returnDocument: "after" },
-    );
-    if (done)
-      await Job.updateOne({ _id: job._id }, { $set: { status: "completed" } });
-    return done || Escrow.findById(escrow._id);
-  }
+  const dispute = await Dispute.findOne({ escrowID: escrow._id, status: "open" });
+  if (dispute || escrow.status === "disputed")
+    throw httpError(409, "This escrow has an open dispute and cannot be released");
+
+  if (escrow.remainingAmount <= 0)
+    throw httpError(409, "There is no remaining balance to release");
+
   return payOut(escrow, "balance_release", { allowedStatuses: HELD_STATES });
 };
 
@@ -339,7 +366,7 @@ export const finalizeTransfer = async (reference, success, data) => {
         ...(success ? { paidAt: new Date() } : {}),
       },
     },
-    { returnDocument: "after"},
+    { new: true },
   );
   if (!txn) return null;
 
@@ -374,7 +401,7 @@ export const finalizeTransfer = async (reference, success, data) => {
       const escrow = await Escrow.findOneAndUpdate(
         { _id: txn.escrowID, status: { $in: [...HELD_STATES, "disputed"] } },
         { $set: { status: "balance_released", completedAt: new Date() } },
-        { returnDocument: "after" },
+        { new: true },
       );
       if (escrow)
         await Job.updateOne(
@@ -439,7 +466,7 @@ export const openDispute = async (escrowId, user, reason, evidence = []) => {
   const frozen = await Escrow.findOneAndUpdate(
     { _id: escrow._id, status: escrow.status },
     { $set: { status: "disputed", statusBeforeDispute: escrow.status } },
-    { returnDocument: "after" },
+    { new: true },
   );
   if (!frozen)
     throw httpError(
@@ -492,7 +519,7 @@ const refundHeld = async (escrow, amount) => {
   const frozen = await Escrow.findOneAndUpdate(
     { _id: escrow._id, status: "disputed" },
     { $set: { status: "refunded", refundedAmount: amount } },
-    { returnDocument: "after" },
+    { new: true },
   );
   if (!frozen) throw httpError(409, "Escrow is no longer in dispute");
 
@@ -518,7 +545,7 @@ const refundHeld = async (escrow, amount) => {
   }
   await Job.updateOne({ _id: escrow.jobID }, { $set: { status: "cancelled" } });
 };
-      "metadata.paymentReference": { $eq: paymentReference },
+      "metadata.paymentReference": { $eq: paymentReference };
 export const finalizeRefund = async (paymentReference, success, data) => {
   const txn = await EscrowTransaction.findOneAndUpdate(
     {
@@ -533,7 +560,7 @@ export const finalizeRefund = async (paymentReference, success, data) => {
         "metadata.result": data,
       },
     },
-    { returnDocument: "after" },
+    { new: true },
   );
   if (!txn || success) return txn;
 
