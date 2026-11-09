@@ -1,13 +1,20 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import Category from "../models/category.js";
 
 const router = Router();
+const categoriesLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 const DEFAULT_CATEGORIES = [
   "Electrical", "Plumbing", "Carpentry", "Painting", "Cleaning",
   "Tiling", "Tailoring", "Mechanical", "Welding",
 ];
 
-router.get("/", async (_req, res) => {
+router.get("/", categoriesLimiter, async (_req, res) => {
   if (!(await Category.exists({}))) {
     try {
       await Category.insertMany(DEFAULT_CATEGORIES.map((name) => ({
