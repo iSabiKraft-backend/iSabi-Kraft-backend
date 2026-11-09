@@ -2,6 +2,7 @@ import Job from "../models/job.js";
 import Escrow from "../models/escrow.js";
 import { httpError } from "../utils/httpError.js";
 import User from "../models/user.js";
+import Category from "../models/category.js";
 import { naira, objectId, sameId, text } from "../utils/validate.js";
 
 const POPULATE = [
@@ -32,7 +33,10 @@ export const createJob = async (req, res) => {
     min: 5,
     max: 2000,
   });
-  const category = text(b.category, { label: "Category", max: 40 });
+  const category = text(b.category, { label: "Category", max: 40 }).toLowerCase();
+  if (await Category.exists({ normalizedName: category, status: "active" }) === null) {
+    throw httpError(400, "Choose an active category from the current category list");
+  }
   const address = text(b.address, { label: "Address", max: 300 });
   const budget = naira(b.budget, { label: "Budget", min: 1 });
 
@@ -140,6 +144,9 @@ export const submitQuote = async (req, res) => {
   }
   if (!req.user.verified) {
     const status = req.user.verificationStatus;
+    if (status === "info_requested") {
+      throw httpError(403, "More identity information is required. Upload the requested documents and resubmit your verification");
+    }
     if (status === "rejected") {
       throw httpError(
         403,

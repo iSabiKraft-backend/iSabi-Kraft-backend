@@ -14,5 +14,6 @@ router.get("/earnings", earnings.summary);
 router.get("/transactions", earnings.transactions);
 router.get("/transactions/:id", earnings.transaction);
 router.put("/me/profile", artisan.saveProfile);
+router.post("/verification/resubmit", artisan.resubmitVerification);
 
 export default router;

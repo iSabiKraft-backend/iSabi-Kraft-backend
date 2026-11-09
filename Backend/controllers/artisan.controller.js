@@ -1,5 +1,8 @@
 import Escrow from "../models/escrow.js";
 import User from "../models/user.js";
+import Category from "../models/category.js";
+import * as supabaseAdmin from "../services/supabaseAdmin.js";
+import { enqueueArtisanSync, drainArtisanSyncQueue, artisanSyncQueueDiagnostics } from "../services/artisanSyncQueue.js";
 import * as paystack from "../services/paystackService.js";
 import { httpError } from "../utils/httpError.js";
 import { text } from "../utils/validate.js";
@@ -105,6 +108,9 @@ export const saveProfile = async (req, res) => {
       : undefined;
 
   const category = normalizeCategory(b.category, trade);
+  if (await Category.exists({ normalizedName: category, status: "active" }) === null) {
+    throw httpError(400, "Choose an active category from the current category list");
+  }
   const next = {
     ...(req.user.toObject().artisan || {}),
     trade,
@@ -128,4 +134,30 @@ export const saveProfile = async (req, res) => {
     req.user.avatarUrl = String(b.avatarUrl);
   await req.user.save();
   res.json({ artisan: req.user.artisan });
+};
+
+
+export const resubmitVerification = async (req, res) => {
+  if (!req.user.supabaseId) throw httpError(400, "Your account is not linked to Supabase");
+  const current = await supabaseAdmin.verificationByUser(req.user.supabaseId);
+  if (!current) throw httpError(404, "Verification application not found");
+  if (current.status !== "info_requested") {
+    throw httpError(409, "Your verification is not awaiting additional information");
+  }
+  if (!current.front_path || !current.selfie_path) {
+    throw httpError(400, "Upload the requested identity documents before resubmitting");
+  }
+  const verification = await supabaseAdmin.setVerificationStatus(
+    req.user.supabaseId,
+    "pending",
+    null,
+  );
+  await enqueueArtisanSync(req.user.supabaseId);
+  const worker = await drainArtisanSyncQueue({ maxJobs: 3 });
+  res.status(202).json({
+    verification,
+    processedImmediately: worker.processed,
+    queue: await artisanSyncQueueDiagnostics(),
+    message: "Your updated verification has been resubmitted for review.",
+  });
 };
