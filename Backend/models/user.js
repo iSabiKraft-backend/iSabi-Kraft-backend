@@ -8,7 +8,14 @@ const userSchema = new mongoose.Schema(
     email: { type: String, trim: true, lowercase: true },
     phone: { type: String, trim: true },
     verified: { type: Boolean, default: false },
+    verificationStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected", "info_requested"],
+      default: "pending",
+      index: true,
+    },
     avatarUrl: { type: String, trim: true },
+    lastLoginAt: { type: Date },
 
     artisan: {
       trade: { type: String, trim: true, maxlength: 60 },
