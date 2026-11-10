@@ -45,6 +45,19 @@ const escrowSchema = new mongoose.Schema(
       enum: ["pending", "processing", "completed", "failed", "not_applicable"],
       default: "pending",
     },
+    // Material funds cannot be paid out until an admin approves the artisan's request.
+    materialApprovalStatus: {
+      type: String,
+      enum: ["not_requested", "requested", "approved", "rejected"],
+      default: "not_requested",
+      index: true,
+    },
+    materialRequestNote: { type: String, default: "" },
+    materialEvidenceUrls: { type: [String], default: [] },
+    materialRequestedAt: Date,
+    materialReviewedAt: Date,
+    materialReviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    materialRejectionReason: { type: String, default: "" },
     balancePaymentStatus: {
       type: String,
       enum: ["pending", "processing", "completed", "failed"],

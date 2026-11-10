@@ -268,16 +268,92 @@ const payOut = async (escrow, kind, { allowedStatuses, amount }) => {
   return Escrow.findById(escrow._id);
 };
 
-export const releaseMaterial = async (escrowId, user) => {
+/**
+ * Artisan requests the agreed material fee. This records the request only;
+ * it never initiates a Paystack transfer.
+ */
+export const requestMaterialApproval = async (escrowId, artisan, note, evidenceUrls = []) => {
   const escrow = await Escrow.findById(escrowId);
-  assertParticipant(escrow, user);
+  if (!escrow || !sameId(escrow.artisanID, artisan._id))
+    throw httpError(404, "Escrow not found");
 
-  if (escrow.materialPaymentStatus === "not_applicable")
+  if (escrow.status !== "payment_confirmed")
+    throw httpError(409, "Material funds can only be requested after escrow is funded");
+  if (escrow.materialPaymentStatus === "not_applicable" || escrow.materialAmount <= 0)
     throw httpError(409, "This job has no material payment");
+  if (["processing", "completed"].includes(escrow.materialPaymentStatus))
+    throw httpError(409, "Material payment is already processing or completed");
+  if (escrow.materialApprovalStatus === "requested" || escrow.materialApprovalStatus === "approved")
+    throw httpError(409, "A material approval request is already pending or approved");
 
+  escrow.materialApprovalStatus = "requested";
+  escrow.materialRequestNote = note;
+  escrow.materialEvidenceUrls = evidenceUrls;
+  escrow.materialRequestedAt = new Date();
+  escrow.materialReviewedAt = undefined;
+  escrow.materialReviewedBy = undefined;
+  escrow.materialRejectionReason = "";
+  await escrow.save();
+  return escrow;
+};
+
+export const listPendingMaterialApprovals = async () =>
+  Escrow.find({
+    status: "payment_confirmed",
+    materialApprovalStatus: "requested",
+    materialPaymentStatus: { $in: ["pending", "failed"] },
+  })
+    .populate("customerID", "fullName email phone")
+    .populate("artisanID", "fullName email phone")
+    .populate("jobID")
+    .sort({ materialRequestedAt: 1 });
+
+/** Admin approval is the only path that can initiate the material payout. */
+export const approveMaterialPayment = async (escrowId, admin) => {
+  const escrow = await Escrow.findById(escrowId);
+  if (!escrow || escrow.status !== "payment_confirmed")
+    throw httpError(409, "Escrow is not eligible for material payment approval");
+  if (escrow.materialPaymentStatus === "not_applicable" || escrow.materialAmount <= 0)
+    throw httpError(409, "This job has no material payment");
+  if (escrow.materialPaymentStatus === "completed")
+    throw httpError(409, "Material payment has already been completed");
+  if (escrow.materialApprovalStatus !== "requested" && escrow.materialApprovalStatus !== "approved")
+    throw httpError(409, "There is no material request awaiting approval");
+
+  if (escrow.materialApprovalStatus === "requested") {
+    escrow.materialApprovalStatus = "approved";
+    escrow.materialReviewedAt = new Date();
+    escrow.materialReviewedBy = admin._id;
+    escrow.materialRejectionReason = "";
+    await escrow.save();
+  }
+
+  // payOut atomically claims materialPaymentStatus, preventing duplicate transfers.
   return payOut(escrow, "material_payment", {
     allowedStatuses: ["payment_confirmed"],
   });
+};
+
+export const rejectMaterialPayment = async (escrowId, admin, reason) => {
+  const escrow = await Escrow.findOneAndUpdate(
+    {
+      _id: escrowId,
+      status: "payment_confirmed",
+      materialApprovalStatus: "requested",
+      materialPaymentStatus: { $in: ["pending", "failed"] },
+    },
+    {
+      $set: {
+        materialApprovalStatus: "rejected",
+        materialReviewedAt: new Date(),
+        materialReviewedBy: admin._id,
+        materialRejectionReason: reason,
+      },
+    },
+    { new: true, runValidators: true },
+  );
+  if (!escrow) throw httpError(409, "No pending material request is available to reject");
+  return escrow;
 };
 
 export const markCompleted = async (escrowId, artisan, note, photos = []) => {

@@ -32,6 +32,11 @@ router.patch("/categories/:id", admin.updateCategory);
 router.get("/audit", admin.adminAuditLog);
 router.post("/transfers/reconcile", admin.reconcile);
 router.post("/transfers/:reference/reconcile", admin.reconcile);
+router.get("/escrow-releases", admin.pendingEscrowReleases);
+router.post("/escrow-releases/:escrowId/approve", admin.approveEscrowRelease);
+router.get("/material-approvals", admin.pendingMaterialApprovals);
+router.post("/material-approvals/:escrowId/approve", admin.approveMaterialRequest);
+router.post("/material-approvals/:escrowId/reject", admin.rejectMaterialRequest);
 
 router.get("/artisan-discovery-diagnostics", admin.artisanDiscoveryDiagnostics);
 router.post("/artisan-discovery-reconcile", admin.reconcileArtisanMarketplace);
