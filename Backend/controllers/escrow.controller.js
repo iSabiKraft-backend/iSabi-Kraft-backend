@@ -12,9 +12,27 @@ export const getEscrow = async (req, res) => {
   res.json({ escrow, transactions });
 };
 
-export const payMaterials = async (req, res) => {
-  const escrow = await escrowService.releaseMaterial(objectId(req.params.id, "escrow id"), req.user);
-  res.json({ escrow });
+export const requestMaterialApproval = async (req, res) => {
+  const note = text(req.body.note, {
+    label: "Material request note",
+    max: 1000,
+  });
+  const evidenceUrls = Array.isArray(req.body.evidenceUrls)
+    ? req.body.evidenceUrls
+        .filter((url) => typeof url === "string" && /^https:\/\//i.test(url))
+        .slice(0, 10)
+    : [];
+
+  const escrow = await escrowService.requestMaterialApproval(
+    objectId(req.params.id, "escrow id"),
+    req.user,
+    note,
+    evidenceUrls,
+  );
+  res.status(202).json({
+    message: "Material fee request submitted for admin review",
+    escrow,
+  });
 };
 
 export const markCompleted = async (req, res) => {

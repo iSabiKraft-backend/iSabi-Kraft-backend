@@ -510,6 +510,46 @@ export const reconcile = async (req, res) => {
   res.json({ results: await reconcilePendingTransfers() });
 };
 
+export const pendingEscrowReleases = async (_req, res) => {
+  res.json({ releases: await listPendingAdminReleases() });
+};
+
+export const approveEscrowRelease = async (req, res) => {
+  res.json({
+    escrow: await approveCompletedJobRelease(
+      objectId(req.params.escrowId, "escrow id"),
+    ),
+  });
+};
+
+export const pendingMaterialApprovals = async (_req, res) => {
+  res.json({ materialRequests: await listPendingMaterialApprovals() });
+};
+
+export const approveMaterialRequest = async (req, res) => {
+  const escrow = await approveMaterialPayment(
+    objectId(req.params.escrowId, "escrow id"),
+    req.user,
+  );
+  res.json({
+    message: "Material fee approved and payout processing has been initiated",
+    escrow,
+  });
+};
+
+export const rejectMaterialRequest = async (req, res) => {
+  const reason = text(req.body.reason, {
+    label: "Rejection reason",
+    max: 1000,
+  });
+  const escrow = await rejectMaterialPayment(
+    objectId(req.params.escrowId, "escrow id"),
+    req.user,
+    reason,
+  );
+  res.json({ message: "Material fee request rejected", escrow });
+};
+
 export const artisanDiscoveryDiagnostics = async (_req, res) => {
   const [totalArtisans, verifiedArtisans, withTrade, availableArtisans, discoverableArtisans] = await Promise.all([
     User.countDocuments({ role: "artisan" }),
