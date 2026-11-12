@@ -6,10 +6,9 @@ const AI_SERVICE_API_KEY = process.env.AI_SERVICE_API_KEY || "";
 
 export async function requestArtisanMatches(job, artisans) {
   if (!AI_SERVICE_URL || !AI_SERVICE_API_KEY) {
-    console.error("AI MATCHING CONFIGURATION ERROR:", {
-      urlConfigured: Boolean(AI_SERVICE_URL),
-      apiKeyConfigured: Boolean(AI_SERVICE_API_KEY),
-    });
+    console.error(
+      "AI MATCHING CONFIGURATION ERROR: Missing required AI service configuration.",
+    );
 
     const error = new Error("AI recommendations are not configured.");
     error.status = 503;
