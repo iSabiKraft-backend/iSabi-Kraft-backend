@@ -118,16 +118,30 @@ export const summary = async (req, res) => {
   });
 };
 
-export const transactions = async (req, res) => {
-  const ctx = await loadContext(req.user._id);
+
+  // Accept only scalar strings from query parameters.
+  const requestedType =
+    typeof req.query.type === "string" ? req.query.type : null;
+
+  const requestedStatus =
+    typeof req.query.status === "string" ? req.query.status : null;
+
+  const allowedStatuses = ["pending", "completed", "failed"];
+
   const filter = {
     escrowID: { $in: ctx.escrows.map((e) => e._id) },
     transactionType: { $in: PAYOUT_TYPES },
   };
-  if (PAYOUT_TYPES.includes(req.query.type))
-    filter.transactionType = req.query.type;
-  if (["pending", "completed", "failed"].includes(req.query.status))
-    filter.status = req.query.status;
+
+  // Validate against server-controlled allowlists.
+  if (requestedType && PAYOUT_TYPES.includes(requestedType)) {
+    filter.transactionType = { $eq: requestedType };
+  }
+
+  if (requestedStatus && allowedStatuses.includes(requestedStatus)) {
+    filter.status = { $eq: requestedStatus };
+  }
+
 
   const all = (
     await EscrowTransaction.find(filter)
