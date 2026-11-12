@@ -109,7 +109,8 @@ const callbackUrl = () => {
 };
 
 export const confirmPayment = async (reference, tx) => {
-  const payment = await Payment.findOne({ reference });
+  const safeReference = String(reference);
+  const payment = await Payment.findOne({ reference: { $eq: safeReference } });
   if (!payment) return null;
 
   if (payment.status === "pending") {
@@ -121,7 +122,7 @@ export const confirmPayment = async (reference, tx) => {
       return payment;
     }
     if (
-      tx.reference !== reference ||
+      tx.reference !== safeReference ||
       tx.amount !== toKobo(payment.amount) ||
       tx.currency !== "NGN"
     ) {
@@ -129,7 +130,7 @@ export const confirmPayment = async (reference, tx) => {
       payment.note = "amount_mismatch";
       await payment.save();
       console.error("Paystack amount mismatch", {
-        reference,
+        reference: safeReference,
         paid: tx.amount,
         expected: toKobo(payment.amount),
       });
