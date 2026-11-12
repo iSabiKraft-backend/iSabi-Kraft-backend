@@ -14,7 +14,7 @@ export async function enqueueArtisanSync(userId) {
   const active = await ArtisanSyncJob.findOneAndUpdate(
     { supabaseId: userId, status: "processing" },
     { $set: { rerunRequested: true, updatedAt: new Date() } },
-    { returnDocument: "after" },
+    { returnDocument: 'after' },
   );
   if (active) return active;
 
@@ -34,7 +34,7 @@ export async function enqueueArtisanSync(userId) {
         },
         $setOnInsert: { createdAt: new Date() },
       },
-      { upsert: true, returnDocument: "after", setDefaultsOnInsert: true },
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
     );
   } catch (error) {
     if (error?.code !== 11000) throw error;
@@ -52,7 +52,7 @@ export async function enqueueArtisanSync(userId) {
           updatedAt: new Date(),
         },
       },
-      { returnDocument: "after" },
+      { returnDocument: 'after' },
     );
   }
 }
@@ -71,7 +71,7 @@ async function processOne() {
       $set: { status: "processing", lockedAt: now, updatedAt: now },
       $inc: { attempts: 1 },
     },
-    { sort: { nextRunAt: 1, createdAt: 1 }, returnDocument: "after" },
+    { sort: { nextRunAt: 1, createdAt: 1 }, returnDocument: 'after' },
   );
   if (!job) return false;
 

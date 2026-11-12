@@ -45,19 +45,6 @@ const escrowSchema = new mongoose.Schema(
       enum: ["pending", "processing", "completed", "failed", "not_applicable"],
       default: "pending",
     },
-    // Material funds cannot be paid out until an admin approves the artisan's request.
-    materialApprovalStatus: {
-      type: String,
-      enum: ["not_requested", "requested", "approved", "rejected"],
-      default: "not_requested",
-      index: true,
-    },
-    materialRequestNote: { type: String, default: "" },
-    materialEvidenceUrls: { type: [String], default: [] },
-    materialRequestedAt: Date,
-    materialReviewedAt: Date,
-    materialReviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-    materialRejectionReason: { type: String, default: "" },
     balancePaymentStatus: {
       type: String,
       enum: ["pending", "processing", "completed", "failed"],
@@ -65,6 +52,32 @@ const escrowSchema = new mongoose.Schema(
     },
     materialTransferCode: String,
     finalTransferCode: String,
+    materialApprovalStatus: {
+      type: String,
+      enum: ["not_requested", "awaiting_approval", "approved", "rejected", "processing", "completed", "failed"],
+      default: "not_requested",
+    },
+    materialApprovalRequestedAt: Date,
+    materialApprovalReviewedAt: Date,
+    // Material request details submitted by the artisan.
+    materialRequestNote: { type: String, trim: true, maxlength: 1000 },
+    materialEvidenceUrls: { type: [{ type: String, trim: true }], default: [], validate: v => v.length <= 10 },
+    // New names; legacy fields below remain for backwards compatibility.
+    materialReviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    materialRejectionReason: { type: String, trim: true, maxlength: 500 },
+    materialApprovalAdminID: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    materialApprovalReason: { type: String, trim: true, maxlength: 500 },
+    balanceApprovalStatus: {
+      type: String,
+      enum: ["not_requested", "awaiting_approval", "approved", "rejected", "processing", "completed", "failed"],
+      default: "not_requested",
+    },
+    balanceApprovalRequestedAt: Date,
+    balanceApprovalReviewedAt: Date,
+    balanceApprovalAdminID: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    balanceApprovalReason: { type: String, trim: true, maxlength: 500 },
+    // Three-day dispute window starts when the artisan submits completion evidence.
+    disputeWindowEndsAt: Date,
     completedAt: Date,
   },
   { timestamps: true },

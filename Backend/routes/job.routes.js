@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import * as jobs from "../controllers/job.controller.js";
+import * as recommendations from "../controllers/recommendation.controller.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -8,6 +9,7 @@ router.use(requireAuth);
 router.post("/", requireRole("customer"), jobs.createJob);
 router.get("/", jobs.listJobs);
 router.get("/:id", jobs.getJob);
+router.post("/:id/recommendations", requireRole("customer"), recommendations.recommendationsForJob);
 router.post("/:id/quotes", requireRole("artisan"), jobs.submitQuote);
 router.post("/:id/quotes/:quoteId/accept", requireRole("customer"), jobs.acceptQuote);
 router.post("/:id/quotes/:quoteId/decline", requireRole("customer"), jobs.declineQuote);

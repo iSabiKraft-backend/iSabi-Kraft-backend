@@ -6,9 +6,9 @@ import Category from "../models/category.js";
 import { naira, objectId, sameId, text } from "../utils/validate.js";
 
 const POPULATE = [
-  { path: "customerID", select: "fullName" },
-  { path: "artisanID", select: "fullName supabaseId verified" },
-  { path: "quotes.artisanID", select: "fullName supabaseId verified" },
+  { path: "customerID", select: "fullName avatarUrl avatar_url" },
+  { path: "artisanID", select: "fullName avatarUrl avatar_url supabaseId verified" },
+  { path: "quotes.artisanID", select: "fullName avatarUrl avatar_url supabaseId verified" },
 ];
 
 const shape = (job, user, role) => {
@@ -180,10 +180,25 @@ export const submitQuote = async (req, res) => {
   });
   const total = labour + materials + additional;
   if (total < 1) throw httpError(400, "Quote total must be greater than zero");
+  const materialItems = Array.isArray(req.body.materialItems)
+    ? req.body.materialItems.slice(0, 24).map((item) => {
+        const quantity = Number(item.quantity);
+        const unitPrice = naira(item.unitPrice ?? 0, { label: "Material unit price" });
+        if (!Number.isFinite(quantity) || quantity <= 0 || quantity > 100000)
+          throw httpError(400, "Material quantity must be greater than zero");
+        return {
+          name: text(item.name, { label: "Material name", max: 80 }),
+          quantity,
+          unitPrice,
+          total: Math.round(quantity * unitPrice),
+        };
+      })
+    : [];
 
   const fields = {
     labour,
     materials,
+    materialItems,
     additional,
     total,
     duration: text(req.body.duration, {

@@ -9,6 +9,12 @@ const quoteSchema = new mongoose.Schema(
     },
     labour: { type: Number, required: true, min: 0 },
     materials: { type: Number, required: true, min: 0 },
+    materialItems: [{
+      name: { type: String, trim: true, maxlength: 80 },
+      quantity: { type: Number, min: 0 },
+      unitPrice: { type: Number, min: 0 },
+      total: { type: Number, min: 0 },
+    }],
     additional: { type: Number, default: 0, min: 0 },
     total: { type: Number, required: true, min: 1 },
     duration: { type: String, trim: true },
