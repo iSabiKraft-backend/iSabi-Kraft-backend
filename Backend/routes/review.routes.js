@@ -7,5 +7,7 @@ router.use(requireAuth);
 
 router.post("/", requireRole("customer"), d.createReview);
 router.get("/mine", requireRole("artisan"), d.myReviews);
+router.get("/job/:jobId", requireRole("customer"), d.reviewForJob);
+router.patch("/job/:jobId", requireRole("customer"), d.updateReview);
 
 export default router;

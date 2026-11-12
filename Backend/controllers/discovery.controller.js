@@ -194,6 +194,7 @@ const reviewShape = (r) => ({
   id: String(r._id),
   rating: r.rating,
   comment: r.comment || "",
+  edited: Boolean(r.edited),
   createdAt: r.createdAt,
   reviewer: shortName(r.customerID?.fullName),
   reviewerAvatar: r.customerID?.avatarUrl || null,
@@ -348,6 +349,101 @@ export const createReview = async (req, res) => {
   res.status(201).json({
     review: reviewShape({ ...review.toObject(), customerID: req.user }),
   });
+};
+
+export const reviewForJob = async (req, res) => {
+  const review = await Review.findOne({
+    jobID: objectId(req.params.jobId, "job id"),
+    customerID: req.user._id,
+  })
+    .populate("customerID", "fullName avatarUrl")
+    .populate("artisanID", "fullName")
+    .lean();
+  res.json({
+    review: review
+      ? {
+          ...reviewShape(review),
+          artisanName: review.artisanID?.fullName || "",
+        }
+      : null,
+  });
+};
+
+export const updateReview = async (req, res) => {
+  const review = await Review.findOne({
+    jobID: objectId(req.params.jobId, "job id"),
+    customerID: req.user._id,
+  });
+  if (!review) throw httpError(404, "Review not found");
+
+  const rating = Number(req.body.rating);
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5)
+    throw httpError(400, "Rating must be 1 to 5 stars");
+  const comment = text(req.body.comment, {
+    label: "Comment",
+    max: 1000,
+    required: false,
+  });
+
+  const previous = review.rating;
+  review.rating = rating;
+  review.comment = comment;
+  review.edited = true;
+  await review.save();
+
+  if (previous !== rating) {
+    // Move one vote between star buckets, then refresh the average.
+    await User.updateOne({ _id: review.artisanID }, [
+      {
+        $set: {
+          ratingBreakdown: {
+            $map: {
+              input: { $range: [0, 5] },
+              as: "i",
+              in: {
+                $add: [
+                  { $ifNull: [{ $arrayElemAt: ["$ratingBreakdown", "$$i"] }, 0] },
+                  { $cond: [{ $eq: ["$$i", rating - 1] }, 1, 0] },
+                  { $cond: [{ $eq: ["$$i", previous - 1] }, -1, 0] },
+                ],
+              },
+            },
+          },
+        },
+      },
+      {
+        $set: {
+          ratingAvg: {
+            $cond: [
+              { $gt: ["$ratingCount", 0] },
+              {
+                $divide: [
+                  {
+                    $sum: {
+                      $map: {
+                        input: { $range: [0, 5] },
+                        as: "i",
+                        in: {
+                          $multiply: [
+                            { $add: ["$$i", 1] },
+                            { $arrayElemAt: ["$ratingBreakdown", "$$i"] },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                  "$ratingCount",
+                ],
+              },
+              0,
+            ],
+          },
+        },
+      },
+    ]);
+  }
+
+  res.json({ review: reviewShape({ ...review.toObject(), customerID: req.user }) });
 };
 
 export const myReviews = async (req, res) => {

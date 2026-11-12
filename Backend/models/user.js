@@ -33,6 +33,7 @@ const userSchema = new mongoose.Schema(
       lga: { type: String, trim: true },
       location: { lat: Number, lng: Number },
       portfolio: [String], // https URLs
+      portfolioDetails: [{ url: { type: String, trim: true }, title: { type: String, trim: true, maxlength: 40 }, sub: { type: String, trim: true, maxlength: 40 } }],
       available: { type: Boolean, default: true },
     },
     ratingAvg: { type: Number, default: 0 },

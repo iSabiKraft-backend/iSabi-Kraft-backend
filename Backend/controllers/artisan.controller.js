@@ -29,6 +29,9 @@ export const myPayoutStatus = async (req, res) => {
     verified: req.user.verified,
     hasPayoutAccount: Boolean(req.user.paystackRecipientCode),
     bank: req.user.bank || null,
+    artisan: req.user.artisan || null,
+    avatarUrl: req.user.avatarUrl || null,
+    fullName: req.user.fullName || "",
 
     published: Boolean(req.user.artisan?.trade),
 
@@ -125,6 +128,13 @@ export const saveProfile = async (req, res) => {
     next.location = { lat, lng };
   const portfolio = httpsOnly(b.portfolio);
   if (portfolio) next.portfolio = portfolio;
+  if (b.portfolioDetails && typeof b.portfolioDetails === "object" && !Array.isArray(b.portfolioDetails)) {
+    next.portfolioDetails = Object.entries(b.portfolioDetails).slice(0, 24).map(([url, detail]) => ({
+      url: /^https:\/\//.test(url) ? url : "",
+      title: text(detail?.title, { label: "Project title", max: 40, required: false }),
+      sub: text(detail?.sub, { label: "Project type", max: 40, required: false }),
+    })).filter((item) => item.url);
+  }
   if (typeof b.available === "boolean") next.available = b.available;
 
   req.user.artisan = next;

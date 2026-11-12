@@ -6,7 +6,7 @@ const router = Router();
 router.use(requireAuth);
 
 router.get("/:id", escrow.getEscrow);
-router.post("/:id/materials", requireRole("customer"), escrow.requestMaterialApproval);
+router.post("/:id/materials", requireRole("artisan"), escrow.requestMaterials);
 router.patch("/:id/complete", requireRole("artisan"), escrow.markCompleted);
 router.patch("/:id/confirm-completion", requireRole("customer"), escrow.confirmCompletion);
 

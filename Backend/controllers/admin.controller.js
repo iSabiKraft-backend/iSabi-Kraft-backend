@@ -13,6 +13,10 @@ import {
   reconcilePendingTransfers,
   reconcileTransfer,
   resolveDispute,
+  approveMaterialRelease,
+  rejectMaterialRelease,
+  approveBalanceRelease,
+  rejectBalanceRelease,
 } from "../services/escrowService.js";
 import { httpError } from "../utils/httpError.js";
 import { objectId, text } from "../utils/validate.js";
@@ -400,6 +404,12 @@ export const getJobAdmin = async (req, res) => {
     refunded: escrowRecord.refundedAmount, currency: escrowRecord.currency,
     materialPaymentStatus: escrowRecord.materialPaymentStatus,
     balancePaymentStatus: escrowRecord.balancePaymentStatus,
+    materialApprovalStatus: escrowRecord.materialApprovalStatus || "not_requested",
+    materialApprovalRequestedAt: escrowRecord.materialApprovalRequestedAt || null,
+    materialApprovalReason: escrowRecord.materialApprovalReason || null,
+    balanceApprovalStatus: escrowRecord.balanceApprovalStatus || "not_requested",
+    balanceApprovalRequestedAt: escrowRecord.balanceApprovalRequestedAt || null,
+    balanceApprovalReason: escrowRecord.balanceApprovalReason || null,
   } : null;
   const timeline = [
     { type: "created", at: job.createdAt, label: "Job created" },
@@ -408,6 +418,118 @@ export const getJobAdmin = async (req, res) => {
     ...(job.updatedAt && String(job.updatedAt) !== String(job.createdAt) ? [{ type: "updated", at: job.updatedAt, label: "Last updated" }] : []),
   ].sort((a, b) => new Date(a.at) - new Date(b.at));
   res.json({ job, escrow, dispute: dispute ? { id: dispute._id, status: dispute.status } : null, timeline, review });
+};
+
+export const listPaymentApprovals = async (req, res) => {
+  const filter = { $or: [
+    { materialApprovalStatus: "awaiting_approval" },
+    { balanceApprovalStatus: "awaiting_approval" },
+  ] };
+  const rows = await Escrow.find(filter).sort({ materialApprovalRequestedAt: -1, balanceApprovalRequestedAt: -1 })
+    .populate("jobID", "title status category completionNote completionPhotos completionMarkedAt")
+    .populate("customerID", "fullName email phone")
+    .populate("artisanID", "fullName email phone")
+    .lean();
+  const approvals = rows.flatMap((e) => {
+    const base = {
+      escrowId: e._id, jobId: e.jobID?._id,
+      jobRef: e.jobID ? `JOB-${String(e.jobID._id).slice(-6).toUpperCase()}` : null,
+      jobTitle: e.jobID?.title, jobStatus: e.jobID?.status,
+      customer: e.customerID, artisan: e.artisanID,
+      currency: e.currency, totalAmount: e.totalAmount,
+      materialAmount: e.materialAmount, remainingAmount: e.remainingAmount,
+      completionNote: e.jobID?.completionNote || null,
+      completionPhotos: e.jobID?.completionPhotos || [],
+      completionMarkedAt: e.jobID?.completionMarkedAt || null,
+    };
+    const result = [];
+    if (e.materialApprovalStatus === "awaiting_approval") result.push({ ...base, id: `${e._id}:material`, type: "material", amount: e.materialAmount, requestedAt: e.materialApprovalRequestedAt });
+    if (e.balanceApprovalStatus === "awaiting_approval") result.push({ ...base, id: `${e._id}:balance`, type: "completion", amount: e.remainingAmount, requestedAt: e.balanceApprovalRequestedAt });
+    return result;
+  });
+  res.json({ approvals, counts: {
+    total: approvals.length,
+    material: approvals.filter((x) => x.type === "material").length,
+    completion: approvals.filter((x) => x.type === "completion").length,
+  } });
+};
+
+export const reviewPaymentApproval = async (req, res) => {
+  const escrowId = objectId(req.params.escrowId, "escrow id");
+  const type = String(req.params.type || "");
+  const decision = String(req.body.decision || "");
+  if (!["material", "completion"].includes(type)) throw httpError(400, "Invalid payment approval type");
+  if (!["approve", "reject"].includes(decision)) throw httpError(400, "Decision must be approve or reject");
+  const reason = decision === "reject" ? text(req.body.reason, { label: "Rejection reason", max: 500 }) : null;
+  const escrow = type === "material"
+    ? decision === "approve" ? await approveMaterialRelease(escrowId, req.user) : await rejectMaterialRelease(escrowId, req.user, reason)
+    : decision === "approve" ? await approveBalanceRelease(escrowId, req.user) : await rejectBalanceRelease(escrowId, req.user, reason);
+  await audit(req, `payment_${type}_${decision}`, "escrow", escrowId, { type, decision, reason, amount: type === "material" ? escrow.materialAmount : escrow.remainingAmount });
+  res.json({ escrow, message: decision === "approve" ? "Payment approval processed" : "Payment release rejected" });
+};
+
+
+
+// Dedicated material-payment approval queue.
+export const listMaterialApprovals = async (_req, res) => {
+  const rows = await Escrow.find({ materialApprovalStatus: "awaiting_approval" })
+    .sort({ materialApprovalRequestedAt: 1 })
+    .populate("jobID", "title status category")
+    .populate("customerID", "fullName email phone")
+    .populate("artisanID", "fullName email phone")
+    .lean();
+  res.json({ approvals: rows.map((e) => ({
+    escrowId: e._id, job: e.jobID, customer: e.customerID, artisan: e.artisanID,
+    materialAmount: e.materialAmount, currency: e.currency,
+    note: e.materialRequestNote || "", evidencePhotoUrls: e.materialEvidenceUrls || [],
+    requestedAt: e.materialApprovalRequestedAt,
+  })) });
+};
+
+export const approveMaterialApproval = async (req, res) => {
+  const escrowId = objectId(req.params.escrowId, "escrow id");
+  const escrow = await approveMaterialRelease(escrowId, req.user);
+  await audit(req, "material_payment_approved", "escrow", escrowId, { amount: escrow.materialAmount });
+  res.json({ escrow, message: "Material payment approved and payout initiated" });
+};
+
+export const rejectMaterialApproval = async (req, res) => {
+  const escrowId = objectId(req.params.escrowId, "escrow id");
+  const reason = text(req.body.reason, { label: "Rejection reason", max: 500 });
+  const escrow = await rejectMaterialRelease(escrowId, req.user, reason);
+  await audit(req, "material_payment_rejected", "escrow", escrowId, { reason });
+  res.json({ escrow, message: "Material payment request rejected" });
+};
+
+// The queue may show requests before they become eligible. Approval is only
+// possible after the dispute window has expired and the escrow is not disputed.
+export const listEscrowReleases = async (_req, res) => {
+  const rows = await Escrow.find({ balanceApprovalStatus: "awaiting_approval" })
+    .sort({ balanceApprovalRequestedAt: 1 })
+    .populate("jobID", "title status completionMarkedAt completionNote completionPhotos")
+    .populate("customerID", "fullName email phone")
+    .populate("artisanID", "fullName email phone")
+    .lean();
+  const now = Date.now();
+  res.json({ releases: rows.map((e) => {
+    const eligibleAt = e.disputeWindowEndsAt || (e.jobID?.completionMarkedAt
+      ? new Date(new Date(e.jobID.completionMarkedAt).getTime() + 3 * 24 * 60 * 60 * 1000)
+      : null);
+    return {
+      escrowId: e._id, job: e.jobID, customer: e.customerID, artisan: e.artisanID,
+      amount: e.remainingAmount, currency: e.currency,
+      requestedAt: e.balanceApprovalRequestedAt, eligibleAt,
+      canApprove: Boolean(eligibleAt && now >= new Date(eligibleAt).getTime() && e.status !== "disputed"),
+      disputed: e.status === "disputed",
+    };
+  }) });
+};
+
+export const approveEscrowRelease = async (req, res) => {
+  const escrowId = objectId(req.params.escrowId, "escrow id");
+  const escrow = await approveBalanceRelease(escrowId, req.user);
+  await audit(req, "escrow_balance_release_approved", "escrow", escrowId, { amount: escrow.remainingAmount });
+  res.json({ escrow, message: "Final balance release approved and payout initiated" });
 };
 
 export const listCategories = async (req, res) => {
@@ -467,7 +589,7 @@ export const dashboard = async (_req, res) => {
   const thisMonth = new Date(); thisMonth.setDate(1); thisMonth.setHours(0, 0, 0, 0);
   const [
     verificationCounts, openDisputes, activeJobs, totalArtisans, totalCustomers,
-    funded, completedThisMonth, completedLastMonth, recentJobs, recentDisputes,
+    funded, completedThisMonth, completedLastMonth, recentJobs, recentDisputes, pendingPaymentApprovals,
   ] = await Promise.all([
     supabaseAdmin.verificationCounts(),
     Dispute.countDocuments({ status: { $in: ["open", "in_review"] } }),
@@ -479,10 +601,11 @@ export const dashboard = async (_req, res) => {
     Job.countDocuments({ status: "completed", updatedAt: { $gte: new Date(thisMonth.getFullYear(), thisMonth.getMonth() - 1, 1), $lt: thisMonth } }),
     Job.find().sort({ createdAt: -1 }).limit(10).populate("customerID", "fullName").populate("artisanID", "fullName").lean(),
     Dispute.find().sort({ createdAt: -1 }).limit(10).populate("jobID", "title").lean(),
+    Escrow.countDocuments({ $or: [{ materialApprovalStatus: "awaiting_approval" }, { balanceApprovalStatus: "awaiting_approval" }] }),
   ]);
   const totalVolume = await Payment.aggregate([{ $match: { status: "completed" } }, { $group: { _id: null, total: { $sum: "$amount" } } }]);
   res.json({
-    stats: { pendingVerifications: verificationCounts.pending || 0, openDisputes, activeJobs, totalArtisans, totalCustomers,
+    stats: { pendingVerifications: verificationCounts.pending || 0, pendingPaymentApprovals, openDisputes, activeJobs, totalArtisans, totalCustomers,
       fundsHeld: funded[0]?.total || 0, completedThisMonth, completedLastMonth,
       totalVolume: totalVolume[0]?.total || 0 },
     recentActivity: [
@@ -508,46 +631,6 @@ export const reconcile = async (req, res) => {
     return res.json({ settled: Boolean(settled) });
   }
   res.json({ results: await reconcilePendingTransfers() });
-};
-
-export const pendingEscrowReleases = async (_req, res) => {
-  res.json({ releases: await listPendingAdminReleases() });
-};
-
-export const approveEscrowRelease = async (req, res) => {
-  res.json({
-    escrow: await approveCompletedJobRelease(
-      objectId(req.params.escrowId, "escrow id"),
-    ),
-  });
-};
-
-export const pendingMaterialApprovals = async (_req, res) => {
-  res.json({ materialRequests: await listPendingMaterialApprovals() });
-};
-
-export const approveMaterialRequest = async (req, res) => {
-  const escrow = await approveMaterialPayment(
-    objectId(req.params.escrowId, "escrow id"),
-    req.user,
-  );
-  res.json({
-    message: "Material fee approved and payout processing has been initiated",
-    escrow,
-  });
-};
-
-export const rejectMaterialRequest = async (req, res) => {
-  const reason = text(req.body.reason, {
-    label: "Rejection reason",
-    max: 1000,
-  });
-  const escrow = await rejectMaterialPayment(
-    objectId(req.params.escrowId, "escrow id"),
-    req.user,
-    reason,
-  );
-  res.json({ message: "Material fee request rejected", escrow });
 };
 
 export const artisanDiscoveryDiagnostics = async (_req, res) => {

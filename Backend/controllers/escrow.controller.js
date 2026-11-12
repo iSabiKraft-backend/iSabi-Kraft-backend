@@ -12,33 +12,38 @@ export const getEscrow = async (req, res) => {
   res.json({ escrow, transactions });
 };
 
-export const requestMaterialApproval = async (req, res) => {
-  const note = text(req.body.note, {
-    label: "Material request note",
-    max: 1000,
+export const requestMaterials = async (req, res) => {
+  const note = text(req.body.note, { label: "Material request note", max: 1000 });
+  const rawUrls = req.body.evidencePhotoUrls ?? req.body.photos ?? [];
+  if (!Array.isArray(rawUrls) || rawUrls.length > 10) {
+    throw httpError(400, "Provide no more than 10 evidence photo URLs");
+  }
+  const evidencePhotoUrls = rawUrls.map((value) => {
+    let parsed;
+    try { parsed = new URL(String(value)); } catch { throw httpError(400, "Each evidence photo must be a valid HTTPS URL"); }
+    if (parsed.protocol !== "https:") throw httpError(400, "Each evidence photo must be a valid HTTPS URL");
+    return parsed.toString();
   });
-  const evidenceUrls = Array.isArray(req.body.evidenceUrls)
-    ? req.body.evidenceUrls
-        .filter((url) => typeof url === "string" && /^https:\/\//i.test(url))
-        .slice(0, 10)
-    : [];
-
   const escrow = await escrowService.requestMaterialApproval(
-    objectId(req.params.id, "escrow id"),
-    req.user,
-    note,
-    evidenceUrls,
+    objectId(req.params.id, "escrow id"), req.user, note, evidencePhotoUrls,
   );
-  res.status(202).json({
-    message: "Material fee request submitted for admin review",
-    escrow,
-  });
+  res.status(202).json({ escrow, message: "Material payment request submitted for admin approval" });
 };
 
 export const markCompleted = async (req, res) => {
   const note = text(req.body.completionNote, { label: "Completion note", max: 1000, required: false });
-  const photos = Array.isArray(req.body.photos) ? req.body.photos.filter((u) => /^https:\/\//.test(String(u))).slice(0, 10) : [];
-  const escrow = await escrowService.markCompleted(objectId(req.params.id, "escrow id"), req.user, note, photos);
+  const photos = Array.isArray(req.body.photos)
+    ? req.body.photos.filter((u) => /^https:\/\//.test(String(u))).slice(0, 10)
+    : [];
+  if (photos.length === 0) {
+    throw httpError(400, "Upload at least one completion photo before sending the job for customer review");
+  }
+  const escrow = await escrowService.markCompleted(
+    objectId(req.params.id, "escrow id"),
+    req.user,
+    note,
+    photos,
+  );
   res.json({ escrow });
 };
 

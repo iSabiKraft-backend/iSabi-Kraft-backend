@@ -19,7 +19,7 @@ export const syncArtisanFromSupabase = async (userId) => {
         ? "artisan"
         : "customer",
     verified: status === "approved",
-    verificationStatus: ["pending", "approved", "rejected"].includes(status)
+    verificationStatus: ["pending", "approved", "rejected", "info_requested"].includes(status)
       ? status
       : "pending",
   };
@@ -56,7 +56,7 @@ export const syncArtisanFromSupabase = async (userId) => {
   }
   const user = await User.findOneAndUpdate({ supabaseId: userId }, update, {
     upsert: true,
-    returnDocument: "after",
+    returnDocument: 'after',
     runValidators: true,
     setDefaultsOnInsert: true,
   });
