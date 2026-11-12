@@ -171,7 +171,6 @@ export const summary = async (req, res) => {
     page,
     hasMore: page * limit < rows.length,
   });
-};
 
 export const transaction = async (req, res) => {
   const t = await EscrowTransaction.findById(
